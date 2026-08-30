@@ -16,5 +16,6 @@ export class MiniappController {
   @ApiBearerAuth() @Get('me') me(@CurrentResident() user: ResidentUser) { return this.service.me(user); }
   @ApiBearerAuth() @Get('invoices') invoices(@CurrentResident() user: ResidentUser) { return this.service.invoices(user); }
   @ApiBearerAuth() @Get('invoices/:id') invoice(@CurrentResident() user: ResidentUser, @Param('id') id: string) { return this.service.invoice(user, id); }
+  @ApiBearerAuth() @Get('invoices/:id/payment-qr') paymentQr(@CurrentResident() user: ResidentUser, @Param('id') id: string) { return this.service.paymentQr(user, id); }
   @ApiBearerAuth() @Post('payments') payment(@CurrentResident() user: ResidentUser, @Body() dto: MiniPaymentDto) { return this.service.payment(user, dto); }
 }

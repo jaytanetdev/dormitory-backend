@@ -8,6 +8,8 @@ import type { ResidentUser } from '../common/request-user';
 import { MiniPaymentDto } from './miniapp.dto';
 import { ClaimBranchRoomDto } from './miniapp.dto';
 import { LineService } from '../line/line.service';
+import QRCode from 'qrcode';
+import { generatePromptPayPayload } from '../payments/promptpay';
 @Injectable()
 export class MiniappService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly jwt: JwtService, private readonly line: LineService) {}
@@ -56,6 +58,20 @@ export class MiniappService {
   me(user: ResidentUser) { return this.prisma.resident.findFirstOrThrow({ where: { id: user.residentId, storeId: user.storeId, branchId: user.branchId }, select: { id: true, fullName: true, phone: true, email: true, branch: { select: { id: true, name: true } }, contracts: { where: { status: 'ACTIVE' }, select: { id: true, startDate: true, monthlyRent: true, room: { select: { id: true, number: true, building: { select: { name: true, property: { select: { name: true } } } } } } } } } }); }
   invoices(user: ResidentUser) { return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId } }, select: { id: true, number: true, status: true, total: true, dueDate: true, issuedAt: true, paidAt: true, room: { select: { number: true } }, period: { select: { year: true, month: true } }, payments: { where: { status: 'APPROVED' }, select: { amount: true } } }, orderBy: { dueDate: 'desc' } }); }
   invoice(user: ResidentUser, id: string) { return this.prisma.invoice.findFirstOrThrow({ where: { id, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId } }, include: { items: true, room: { select: { number: true } }, period: true, payments: { include: { slip: true } } } }); }
+  async paymentQr(user: ResidentUser, invoiceId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } },
+      include: { branch: { include: { promptPaySetting: true } }, payments: { where: { status: PaymentStatus.APPROVED }, select: { amount: true } } }
+    });
+    if (!invoice) throw new NotFoundException('Payable invoice not found');
+    const setting = invoice.branch.promptPaySetting;
+    if (!setting?.enabled) throw new NotFoundException('PromptPay is not configured for this branch');
+    const approvedAmount = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const amount = Math.max(0, Number(invoice.total) - approvedAmount);
+    if (amount <= 0) throw new ConflictException('Invoice has no outstanding balance');
+    const payload = generatePromptPayPayload(setting.type, setting.target, amount);
+    return { invoiceId: invoice.id, amount, accountName: setting.accountName, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 480 }) };
+  }
   async payment(user: ResidentUser, dto: MiniPaymentDto) {
     const invoice = await this.prisma.invoice.findFirst({ where: { id: dto.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { payments: { where: { status: PaymentStatus.APPROVED } } } }); if (!invoice) throw new NotFoundException('Payable invoice not found');
     const approved = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0); const outstanding = Math.max(0, Number(invoice.total) - approved); if (dto.amount > outstanding) throw new ConflictException('Payment exceeds outstanding balance');
