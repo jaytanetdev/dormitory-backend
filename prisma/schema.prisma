@@ -119,8 +119,10 @@ model LineIntegration {
   branchId                      String   @unique
   displayName                   String
   channelAccessTokenEncrypted   String
-  channelSecretEncrypted        String
-  loginChannelId                String
+  miniAppChannelSecretEncrypted String
+  miniAppChannelId              String
+  messagingChannelSecretEncrypted String
+  messagingChannelId            String
   liffId                        String
   isActive                      Boolean  @default(true)
   credentialVersion             Int      @default(1)

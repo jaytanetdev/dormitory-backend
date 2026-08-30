@@ -14,7 +14,7 @@ export class AccessService {
   async listBranches(user: RequestUser) {
     const branches = await this.prisma.branch.findMany({
       where: { storeId: user.storeId, deletedAt: null, ...(user.allBranches ? {} : { id: { in: user.branchIds } }) },
-      include: { lineIntegration: { select: { id: true, displayName: true, loginChannelId: true, liffId: true, isActive: true, updatedAt: true } } }, orderBy: { name: 'asc' }
+      include: { lineIntegration: { select: { id: true, displayName: true, miniAppChannelId: true, messagingChannelId: true, liffId: true, isActive: true, updatedAt: true } } }, orderBy: { name: 'asc' }
     });
     const appUrl = this.config.getOrThrow<string>('PUBLIC_APP_URL').replace(/\/$/, '');
     return branches.map((branch) => ({ ...branch, residentClaimUrl: branch.lineIntegration ? `${appUrl}/claim/${branch.claimCode}?liffId=${encodeURIComponent(branch.lineIntegration.liffId)}` : null }));
@@ -24,8 +24,8 @@ export class AccessService {
       return await this.prisma.$transaction(async (tx) => {
         const branch = await tx.branch.create({ data: {
           storeId: user.storeId, name: dto.name, code: dto.code.toUpperCase(), address: dto.address, phone: dto.phone,
-          lineIntegration: { create: { displayName: dto.lineDisplayName, channelAccessTokenEncrypted: this.credentials.encrypt(dto.lineChannelAccessToken), channelSecretEncrypted: this.credentials.encrypt(dto.lineChannelSecret), loginChannelId: dto.lineLoginChannelId, liffId: dto.lineLiffId } }
-        }, include: { lineIntegration: { select: { id: true, displayName: true, loginChannelId: true, liffId: true, isActive: true, updatedAt: true } } } });
+      lineIntegration: { create: { displayName: dto.lineDisplayName, channelAccessTokenEncrypted: this.credentials.encrypt(dto.lineChannelAccessToken), miniAppChannelSecretEncrypted: this.credentials.encrypt(dto.lineMiniAppChannelSecret ?? dto.lineChannelSecret), miniAppChannelId: dto.lineMiniAppChannelId ?? dto.lineLoginChannelId, messagingChannelSecretEncrypted: this.credentials.encrypt(dto.lineMessagingChannelSecret ?? dto.lineChannelSecret), messagingChannelId: dto.lineMessagingChannelId ?? dto.lineLoginChannelId, liffId: dto.lineLiffId } }
+        }, include: { lineIntegration: { select: { id: true, displayName: true, miniAppChannelId: true, messagingChannelId: true, liffId: true, isActive: true, updatedAt: true } } } });
         await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'branch.create', entityType: 'Branch', entityId: branch.id, metadata: { code: branch.code, lineIntegrationId: branch.lineIntegration?.id } } });
         const appUrl = this.config.getOrThrow<string>('PUBLIC_APP_URL').replace(/\/$/, '');
         return { ...branch, residentClaimUrl: `${appUrl}/claim/${branch.claimCode}?liffId=${encodeURIComponent(branch.lineIntegration?.liffId ?? '')}` };
@@ -36,12 +36,12 @@ export class AccessService {
   async updateBranch(user: RequestUser, id: string, dto: UpdateBranchDto) {
     const branch = await this.prisma.branch.findFirst({ where: { id, storeId: user.storeId, deletedAt: null }, include: { lineIntegration: true } });
     if (!branch) throw new NotFoundException('Branch not found'); assertBranchAccess(user, id);
-    const integrationChanged = dto.lineDisplayName !== undefined || dto.lineChannelAccessToken !== undefined || dto.lineChannelSecret !== undefined || dto.lineLoginChannelId !== undefined || dto.lineLiffId !== undefined || dto.lineIsActive !== undefined;
+    const integrationChanged = dto.lineDisplayName !== undefined || dto.lineChannelAccessToken !== undefined || dto.lineChannelSecret !== undefined || dto.lineLoginChannelId !== undefined || dto.lineLiffId !== undefined || dto.lineIsActive !== undefined || dto.lineMiniAppChannelId !== undefined || dto.lineMiniAppChannelSecret !== undefined || dto.lineMessagingChannelId !== undefined || dto.lineMessagingChannelSecret !== undefined;
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.branch.update({ where: { id }, data: {
         name: dto.name, address: dto.address, phone: dto.phone,
-        ...(integrationChanged ? { lineIntegration: { update: { displayName: dto.lineDisplayName, ...(dto.lineChannelAccessToken ? { channelAccessTokenEncrypted: this.credentials.encrypt(dto.lineChannelAccessToken) } : {}), ...(dto.lineChannelSecret ? { channelSecretEncrypted: this.credentials.encrypt(dto.lineChannelSecret) } : {}), loginChannelId: dto.lineLoginChannelId, liffId: dto.lineLiffId, isActive: dto.lineIsActive, ...(dto.lineChannelAccessToken || dto.lineChannelSecret ? { credentialVersion: { increment: 1 } } : {}) } } } : {})
-      }, include: { lineIntegration: { select: { id: true, displayName: true, loginChannelId: true, liffId: true, isActive: true, updatedAt: true } } } });
+        ...(integrationChanged ? { lineIntegration: { update: { displayName: dto.lineDisplayName, ...(dto.lineChannelAccessToken ? { channelAccessTokenEncrypted: this.credentials.encrypt(dto.lineChannelAccessToken) } : {}), ...(dto.lineMiniAppChannelSecret || dto.lineChannelSecret ? { miniAppChannelSecretEncrypted: this.credentials.encrypt(dto.lineMiniAppChannelSecret ?? dto.lineChannelSecret!) } : {}), ...(dto.lineMessagingChannelSecret || dto.lineChannelSecret ? { messagingChannelSecretEncrypted: this.credentials.encrypt(dto.lineMessagingChannelSecret ?? dto.lineChannelSecret!) } : {}), miniAppChannelId: dto.lineMiniAppChannelId ?? dto.lineLoginChannelId, messagingChannelId: dto.lineMessagingChannelId, liffId: dto.lineLiffId, isActive: dto.lineIsActive, ...(dto.lineChannelAccessToken || dto.lineChannelSecret || dto.lineMiniAppChannelSecret || dto.lineMessagingChannelSecret ? { credentialVersion: { increment: 1 } } : {}) } } } : {})
+      }, include: { lineIntegration: { select: { id: true, displayName: true, miniAppChannelId: true, messagingChannelId: true, liffId: true, isActive: true, updatedAt: true } } } });
       await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'branch.update', entityType: 'Branch', entityId: id, metadata: { lineIntegrationChanged: integrationChanged } } });
       return updated;
     });

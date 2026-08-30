@@ -33,7 +33,7 @@ export class LineService {
   async verifySignature(integrationId: string, body: Buffer, signature: string | undefined): Promise<boolean> {
     const integration = await this.prisma.lineIntegration.findFirst({ where: { id: integrationId, isActive: true } });
     if (!integration || !signature) return false;
-    const secret = this.credentials.decrypt(integration.channelSecretEncrypted);
+    const secret = this.credentials.decrypt(integration.messagingChannelSecretEncrypted);
     const expected = createHmac('sha256', secret).update(body).digest('base64');
     return expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
   }
@@ -41,7 +41,7 @@ export class LineService {
     if (this.config.get('NODE_ENV') !== 'production' && idToken.startsWith('mock-line:')) return { sub: idToken.slice(10), name: 'Mock LINE User' };
     const integration = await this.prisma.lineIntegration.findFirst({ where: { id: integrationId, isActive: true } });
     if (!integration) throw new NotFoundException('LINE integration not found');
-    const body = new URLSearchParams({ id_token: idToken, client_id: integration.loginChannelId });
+    const body = new URLSearchParams({ id_token: idToken, client_id: integration.miniAppChannelId });
     const response = await fetch('https://api.line.me/oauth2/v2.1/verify', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
     if (!response.ok) throw new NotFoundException('Invalid LINE ID token');
     const result = await response.json() as { sub?: string; name?: string; picture?: string };
