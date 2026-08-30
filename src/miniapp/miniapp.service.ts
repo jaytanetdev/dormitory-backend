@@ -13,7 +13,18 @@ type UploadedSlip = { buffer: Buffer; mimetype: string; originalname: string; si
 @Injectable()
 export class MiniappService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly jwt: JwtService, private readonly line: LineService) {}
-  async authenticate(idToken: string) {
+  async authenticate(idToken: string, liffId?: string) {
+    if (liffId) {
+      const integration = await this.prisma.lineIntegration.findFirst({ where: { liffId, isActive: true } });
+      if (!integration) throw new UnauthorizedException('LINE Mini App is not configured');
+      const line = await this.line.verifyIdToken(integration.id, idToken);
+      const identity = await this.prisma.lineIdentity.findFirst({
+        where: { lineUserId: line.sub, lineIntegrationId: integration.id },
+        include: { resident: true },
+      });
+      if (!identity || identity.resident.deletedAt) throw new UnauthorizedException('LINE account is not linked');
+      return this.issue(identity.resident, identity.lineUserId);
+    }
     const mockLineId = this.mockLineId(idToken);
     const identity = mockLineId
       ? await this.prisma.lineIdentity.findUnique({ where: { lineUserId: mockLineId }, include: { resident: true } })
@@ -91,6 +102,11 @@ export class MiniappService {
     return { ...(await this.issue(result.resident, result.identity.lineUserId)), resident: { id: result.resident.id, fullName: result.resident.fullName }, room: { id: room.id, number: room.number }, branch: { id: branch.id, name: branch.name } };
   }
   me(user: ResidentUser) { return this.prisma.resident.findFirstOrThrow({ where: { id: user.residentId, storeId: user.storeId, branchId: user.branchId }, select: { id: true, fullName: true, phone: true, email: true, branch: { select: { id: true, name: true } }, contracts: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, status: true, startDate: true, endDate: true, monthlyRent: true, room: { select: { id: true, number: true, building: { select: { name: true, property: { select: { name: true } } } } } } } } } }); }
+  async home(user: ResidentUser) {
+    const [profile, invoices] = await Promise.all([this.me(user), this.invoices(user)]);
+    const invoice = invoices[0] ? await this.invoice(user, invoices[0].id) : null;
+    return { profile, invoices, invoice };
+  }
   invoices(user: ResidentUser) { return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId: user.branchId, status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID] }, contract: { residentId: user.residentId } }, select: { id: true, number: true, status: true, total: true, dueDate: true, issuedAt: true, paidAt: true, room: { select: { number: true } }, period: { select: { year: true, month: true } }, payments: { where: { status: 'APPROVED' }, select: { amount: true } } }, orderBy: { dueDate: 'desc' } }); }
   invoice(user: ResidentUser, id: string) { return this.prisma.invoice.findFirstOrThrow({ where: { id, storeId: user.storeId, branchId: user.branchId, status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID] }, contract: { residentId: user.residentId } }, include: { items: true, room: { select: { number: true } }, period: true, payments: { include: { slip: true } } } }); }
   async paymentQr(user: ResidentUser, invoiceId: string) {
@@ -114,7 +130,7 @@ export class MiniappService {
   }
   async uploadSlip(user: ResidentUser, file: UploadedSlip | undefined, body: { invoiceId: string; amount: string; paidAt: string }) {
     if (!file) throw new NotFoundException('Slip image is required');
-    if (!['image/jpeg', 'image/png'].includes(file.mimetype)) throw new BadRequestException('Slip must be a JPG or PNG image');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) throw new BadRequestException('Slip must be a JPG, PNG, or WebP image');
     if (!Number.isFinite(Number(body.amount)) || Number(body.amount) <= 0) throw new BadRequestException('Payment amount is invalid');
     if (Number.isNaN(new Date(body.paidAt).getTime())) throw new BadRequestException('Payment date is invalid');
     const invoice = await this.prisma.invoice.findFirst({ where: { id: body.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { branch: true, room: true, payments: { where: { status: PaymentStatus.APPROVED }, select: { amount: true } } } });

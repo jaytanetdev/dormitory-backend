@@ -1,6 +1,11 @@
 import { Type } from 'class-transformer';
 import { IsDateString, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUrl, Max } from 'class-validator';
-export class LineIdTokenDto { @IsString() idToken!: string; }
+export class LineIdTokenDto {
+  @IsString() idToken!: string;
+  // LIFF ID identifies the branch's LINE Mini App channel, so login never has
+  // to trial-verify the token against every LINE integration in the store.
+  @IsOptional() @IsString() liffId?: string;
+}
 export class ClaimBranchRoomDto extends LineIdTokenDto {
   @IsString() roomNumber!: string;
   @IsString() fullName!: string;
