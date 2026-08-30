@@ -10,10 +10,25 @@ import { generatePromptPayPayload } from './promptpay';
 @Injectable()
 export class PaymentsService {
   constructor(private readonly prisma: PrismaService) {}
+  async promptPay(user: RequestUser, branchId: string) {
+    assertBranchAccess(user, branchId);
+    const branch = await this.prisma.branch.findFirst({ where: { id: branchId, storeId: user.storeId, deletedAt: null } });
+    if (!branch) throw new NotFoundException('Branch not found');
+    const setting = await this.prisma.promptPaySetting.findUnique({ where: { branchId } });
+    if (!setting) return null;
+    return this.withPreview(setting);
+  }
   async upsertPromptPay(user: RequestUser, branchId: string, dto: UpsertPromptPayDto) {
     assertBranchAccess(user, branchId);
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId, storeId: user.storeId, deletedAt: null } }); if (!branch) throw new NotFoundException('Branch not found');
-    return this.prisma.promptPaySetting.upsert({ where: { branchId }, create: { branchId, ...dto }, update: { ...dto, enabled: true } });
+    generatePromptPayPayload(dto.type, dto.target, 1);
+    const setting = await this.prisma.promptPaySetting.upsert({ where: { branchId }, create: { branchId, ...dto }, update: { ...dto, enabled: true } });
+    return this.withPreview(setting);
+  }
+  private async withPreview(setting: { id: string; branchId: string; type: import('@prisma/client').PromptPayType; target: string; accountName: string; enabled: boolean; createdAt: Date; updatedAt: Date }) {
+    const previewAmount = 100;
+    const payload = generatePromptPayPayload(setting.type, setting.target, previewAmount);
+    return { ...setting, previewAmount, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 360 }) };
   }
   async qr(user: RequestUser, invoiceId: string) {
     const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId, storeId: user.storeId, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { branch: { include: { promptPaySetting: true } }, payments: { where: { status: PaymentStatus.APPROVED } } } }); if (!invoice) throw new NotFoundException('Payable invoice not found'); assertBranchAccess(user, invoice.branchId);
