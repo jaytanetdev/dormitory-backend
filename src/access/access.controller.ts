@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequirePermissions } from '../common/decorators';
 import type { RequestUser } from '../common/request-user';
@@ -11,6 +11,7 @@ export class AccessController {
   @Get('branches') @RequirePermissions('branch.view') branches(@CurrentUser() user: RequestUser) { return this.service.listBranches(user); }
   @Post('branches') @RequirePermissions('branch.create') createBranch(@CurrentUser() user: RequestUser, @Body() dto: CreateBranchDto) { return this.service.createBranch(user, dto); }
   @Patch('branches/:branchId') @RequirePermissions('branch.update') updateBranch(@CurrentUser() user: RequestUser, @Param('branchId') id: string, @Body() dto: UpdateBranchDto) { return this.service.updateBranch(user, id, dto); }
+  @Delete('branches/:branchId') @RequirePermissions('branch.update') deleteBranch(@CurrentUser() user: RequestUser, @Param('branchId') id: string) { return this.service.deleteBranch(user, id); }
   @Get('permissions') @RequirePermissions('role.view') permissions() { return this.service.permissionMatrix(); }
   @Get('roles') @RequirePermissions('role.view') roles(@CurrentUser() user: RequestUser) { return this.service.listRoles(user); }
   @Post('roles') @RequirePermissions('role.create') createRole(@CurrentUser() user: RequestUser, @Body() dto: CreateRoleDto) { return this.service.createRole(user, dto); }

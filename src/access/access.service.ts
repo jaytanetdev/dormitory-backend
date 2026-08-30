@@ -56,6 +56,26 @@ export class AccessService {
       return updated;
     });
   }
+  async deleteBranch(user: RequestUser, id: string) {
+    const branch = await this.prisma.branch.findFirst({ where: { id, storeId: user.storeId, deletedAt: null } });
+    if (!branch) throw new NotFoundException('Branch not found');
+    assertBranchAccess(user, id);
+    const [properties, residents, contracts, invoices, payments] = await this.prisma.$transaction([
+      this.prisma.property.count({ where: { branchId: id, deletedAt: null } }),
+      this.prisma.resident.count({ where: { branchId: id, deletedAt: null } }),
+      this.prisma.contract.count({ where: { branchId: id } }),
+      this.prisma.invoice.count({ where: { branchId: id } }),
+      this.prisma.payment.count({ where: { branchId: id } }),
+    ]);
+    if (properties || residents || contracts || invoices || payments) {
+      throw new ConflictException('ลบสาขานี้ไม่ได้ เพราะมีห้องพัก ผู้เช่า สัญญา หรือประวัติการเงินอยู่แล้ว');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.branch.update({ where: { id }, data: { deletedAt: new Date() } });
+      await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'branch.delete', entityType: 'Branch', entityId: id, metadata: { code: branch.code } } });
+    });
+    return { id, deleted: true };
+  }
   async permissionMatrix() {
     const permissions = await this.prisma.permission.findMany({ orderBy: [{ module: 'asc' }, { action: 'asc' }] });
     return Object.values(permissions.reduce<Record<string, { module: string; actions: { key: string; action: string; description: string | null }[] }>>((acc, item) => {
