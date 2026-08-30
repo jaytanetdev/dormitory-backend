@@ -37,7 +37,8 @@ export class OperationsService {
       await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'room.invite.create', entityType: 'RoomInvite', entityId: created.id, metadata: { roomId, branchId, expiresAt } } });
       return created;
     });
-    return { id: invite.id, roomId, roomNumber: room.number, expiresAt, claimUrl: `https://miniapp.line.me/${encodeURIComponent(integration.liffId)}/claim/${encodeURIComponent(token)}` };
+    const encodedLiffId = encodeURIComponent(integration.liffId);
+    return { id: invite.id, roomId, roomNumber: room.number, expiresAt, claimUrl: `https://miniapp.line.me/${encodedLiffId}/claim/${encodeURIComponent(token)}?liffId=${encodedLiffId}` };
   }
   residents(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.resident.findMany({ where: { storeId: user.storeId, branchId, deletedAt: null }, include: { lineIdentity: true, contracts: { where: { status: ContractStatus.ACTIVE }, include: { room: true } } } }); }
   async createResident(user: RequestUser, dto: CreateResidentDto) { assertBranchAccess(user, dto.branchId); await this.assertBranch(user.storeId, dto.branchId); return this.prisma.resident.create({ data: { storeId: user.storeId, ...dto } }); }
