@@ -17,7 +17,7 @@ export class AccessService {
       include: { lineIntegration: { select: { id: true, displayName: true, miniAppChannelId: true, messagingChannelId: true, liffId: true, isActive: true, updatedAt: true } } }, orderBy: { name: 'asc' }
     });
     const appUrl = this.config.getOrThrow<string>('PUBLIC_APP_URL').replace(/\/$/, '');
-    return branches.map((branch) => ({ ...branch, residentClaimUrl: branch.lineIntegration ? `${appUrl}/claim/${branch.claimCode}?liffId=${encodeURIComponent(branch.lineIntegration.liffId)}` : null }));
+    return branches.map((branch) => ({ ...branch, residentClaimUrl: branch.lineIntegration ? `https://liff.line.me/${branch.lineIntegration.liffId}?liff.state=${encodeURIComponent(`/claim/${branch.claimCode}`)}` : null }));
   }
   async createBranch(user: RequestUser, dto: CreateBranchDto) {
     const accessToken = dto.lineMessagingAccessToken ?? dto.lineChannelAccessToken;
@@ -38,7 +38,7 @@ export class AccessService {
         }, include: { lineIntegration: { select: { id: true, displayName: true, miniAppChannelId: true, messagingChannelId: true, liffId: true, isActive: true, updatedAt: true } } } });
         await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'branch.create', entityType: 'Branch', entityId: branch.id, metadata: { code: branch.code, lineIntegrationId: branch.lineIntegration?.id } } });
         const appUrl = this.config.getOrThrow<string>('PUBLIC_APP_URL').replace(/\/$/, '');
-        return { ...branch, residentClaimUrl: `${appUrl}/claim/${branch.claimCode}?liffId=${encodeURIComponent(branch.lineIntegration?.liffId ?? '')}` };
+        return { ...branch, residentClaimUrl: branch.lineIntegration ? `https://liff.line.me/${branch.lineIntegration.liffId}?liff.state=${encodeURIComponent(`/claim/${branch.claimCode}`)}` : null };
       });
     }
     catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Branch code already exists'); throw error; }
