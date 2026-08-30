@@ -80,8 +80,29 @@ export class MiniappService {
   }
   async uploadSlip(user: ResidentUser, file: UploadedSlip | undefined, body: { invoiceId: string; amount: string; paidAt: string }) {
     if (!file) throw new NotFoundException('Slip image is required');
-    const fileUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: body.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId } }, include: { branch: true, room: true } });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    const fileUrl = await this.uploadToCloudinary(file, invoice.branch.code, invoice.room.number);
     return this.payment(user, { invoiceId: body.invoiceId, amount: Number(body.amount), paidAt: body.paidAt, fileUrl, fileName: file.originalname, mimeType: file.mimetype, size: file.size });
+  }
+  private async uploadToCloudinary(file: UploadedSlip, branchCode: string, roomNumber: string): Promise<string> {
+    const cloudName = this.config.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.config.get<string>('CLOUDINARY_API_KEY');
+    const apiSecret = this.config.get<string>('CLOUDINARY_API_SECRET');
+    if (!cloudName || !apiKey || !apiSecret) throw new ConflictException('Cloudinary is not configured');
+    const now = new Date(); const day = now.toISOString().slice(0, 10);
+    const safe = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const folder = `dormitory/${safe(branchCode)}/${safe(roomNumber)}/${day}`;
+    const timestamp = Math.floor(now.getTime() / 1000).toString();
+    const signature = createHash('sha1').update(`folder=${folder}&timestamp=${timestamp}${apiSecret}`).digest('hex');
+    const form = new FormData();
+    form.append('file', new Blob([file.buffer as unknown as ArrayBuffer], { type: file.mimetype }), file.originalname);
+    form.append('api_key', apiKey); form.append('timestamp', timestamp); form.append('folder', folder); form.append('signature', signature);
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`, { method: 'POST', body: form });
+    if (!response.ok) throw new ConflictException('Cloudinary upload failed');
+    const result = await response.json() as { secure_url?: string };
+    if (!result.secure_url) throw new ConflictException('Cloudinary did not return a file URL');
+    return result.secure_url;
   }
   private async issue(resident: { id: string; storeId: string; branchId: string }, lineUserId: string) { return { accessToken: await this.jwt.signAsync({ sub: resident.id, storeId: resident.storeId, branchId: resident.branchId, lineUserId, type: 'resident' }, { secret: this.config.getOrThrow('JWT_RESIDENT_SECRET'), expiresIn: 3600 }), expiresInSeconds: 3600 }; }
   private async findInvite(token: string) { const invite = await this.prisma.roomInvite.findUnique({ where: { tokenHash: createHash('sha256').update(token).digest('hex') }, include: { contract: { include: { resident: true, room: { include: { building: { include: { property: true } } } } } } } }); if (!invite || invite.status !== 'PENDING' || invite.expiresAt <= new Date()) throw new GoneException('Invite invalid or expired'); return invite; }
