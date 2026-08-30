@@ -51,6 +51,16 @@ export class LineService {
   private toMessage(template: string, payload: Record<string, unknown>): object {
     const scalar = (value: unknown, fallback: string): string => typeof value === 'string' || typeof value === 'number' ? String(value) : fallback;
     if (template === 'invoice-issued') return { type: 'flex', altText: `มีใบแจ้งหนี้ใหม่ ยอด ${scalar(payload.total, '')} บาท`, contents: { type: 'bubble', body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text: 'ใบแจ้งหนี้พร้อมชำระ', weight: 'bold', size: 'lg' }, { type: 'text', text: `ห้อง ${scalar(payload.roomNumber, '-')}` }, { type: 'text', text: `ยอด ${scalar(payload.total, '0')} บาท` }] }, footer: { type: 'box', layout: 'vertical', contents: [{ type: 'button', action: { type: 'uri', label: 'ดูรายละเอียดและชำระ', uri: scalar(payload.url, this.config.get<string>('PUBLIC_APP_URL', 'http://localhost:3001')) } }] } } };
+    if (template === 'payment-approved') {
+      const fullyPaid = payload.fullyPaid === true;
+      return { type: 'flex', altText: fullyPaid ? 'ยืนยันการชำระเงินเรียบร้อยแล้ว' : 'ยืนยันการชำระเงินบางส่วนแล้ว', contents: { type: 'bubble', body: { type: 'box', layout: 'vertical', contents: [
+        { type: 'text', text: fullyPaid ? 'ยืนยันการชำระเงินแล้ว' : 'รับชำระเงินแล้ว', weight: 'bold', size: 'lg', color: '#0B8F70' },
+        { type: 'text', text: `ห้อง ${scalar(payload.roomNumber, '-')}`, margin: 'md' },
+        { type: 'text', text: `ยอดที่ยืนยัน ${scalar(payload.paymentAmount, '0')} บาท` },
+        { type: 'separator', margin: 'md' },
+        { type: 'text', text: fullyPaid ? 'ปิดยอดใบแจ้งหนี้เรียบร้อย ขอบคุณครับ' : `ยอดคงเหลือ ${scalar(payload.remaining, '0')} บาท`, wrap: true, margin: 'md' },
+      ] } } };
+    }
     return { type: 'text', text: scalar(payload.message, template) };
   }
   private withLiffId(url: string, liffId: string | undefined): string {

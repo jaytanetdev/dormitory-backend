@@ -6,10 +6,11 @@ import type { RequestUser } from '../common/request-user';
 import { assertBranchAccess } from '../common/branch-access';
 import { SubmitPaymentDto, UpsertPromptPayDto } from './payments.dto';
 import { generatePromptPayPayload } from './promptpay';
+import { LineService } from '../line/line.service';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly line: LineService) {}
   async promptPay(user: RequestUser, branchId: string) {
     assertBranchAccess(user, branchId);
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId, storeId: user.storeId, deletedAt: null } });
@@ -44,8 +45,8 @@ export class PaymentsService {
   }
   pending(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.payment.findMany({ where: { storeId: user.storeId, branchId, status: PaymentStatus.PENDING }, include: { slip: true, invoice: { include: { room: true, contract: { include: { resident: true } } } } }, orderBy: { createdAt: 'asc' } }); }
   async approve(user: RequestUser, paymentId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.findFirst({ where: { id: paymentId, storeId: user.storeId }, include: { invoice: true } }); if (!payment) throw new NotFoundException('Payment not found'); assertBranchAccess(user, payment.branchId);
+    const result = await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findFirst({ where: { id: paymentId, storeId: user.storeId }, include: { invoice: { include: { room: true, contract: true } } } }); if (!payment) throw new NotFoundException('Payment not found'); assertBranchAccess(user, payment.branchId);
       if (payment.status !== PaymentStatus.PENDING) throw new ConflictException('Payment has already been reviewed');
       const claimed = await tx.payment.updateMany({ where: { id: payment.id, status: PaymentStatus.PENDING }, data: { status: PaymentStatus.APPROVED, reviewedBy: user.id, reviewedAt: new Date() } }); if (claimed.count !== 1) throw new ConflictException('Payment has already been reviewed');
       const approved = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
@@ -53,8 +54,20 @@ export class PaymentsService {
       const paid = Number(aggregate._sum.amount ?? 0); const fullyPaid = paid >= Number(payment.invoice.total);
       await tx.invoice.update({ where: { id: payment.invoiceId }, data: { status: fullyPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID, paidAt: fullyPaid ? new Date() : null } });
       await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'payment.approve', entityType: 'Payment', entityId: payment.id, metadata: { invoiceId: payment.invoiceId, amount: payment.amount.toString() } } });
-      return { payment: approved, invoiceStatus: fullyPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID, approvedTotal: paid };
+      return { payment: approved, invoiceStatus: fullyPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID, approvedTotal: paid, invoice: payment.invoice, remaining: Math.max(0, Number(payment.invoice.total) - paid) };
     });
+    let notification: object = { status: 'SKIPPED', reason: 'LINE_NOT_LINKED' };
+    try {
+      notification = await this.line.sendToResident(user.storeId, result.invoice.branchId, result.invoice.contract.residentId, 'payment-approved', {
+        invoiceId: result.invoice.id,
+        roomNumber: result.invoice.room.number,
+        paymentAmount: result.payment.amount.toString(),
+        approvedTotal: result.approvedTotal,
+        remaining: result.remaining,
+        fullyPaid: result.invoiceStatus === InvoiceStatus.PAID,
+      });
+    } catch { /* payment approval must succeed even if LINE cannot be reached */ }
+    return { payment: result.payment, invoiceStatus: result.invoiceStatus, approvedTotal: result.approvedTotal, notification };
   }
   async reject(user: RequestUser, paymentId: string, reason: string) {
     const payment = await this.prisma.payment.findFirst({ where: { id: paymentId, storeId: user.storeId } }); if (!payment) throw new NotFoundException('Payment not found'); assertBranchAccess(user, payment.branchId);
