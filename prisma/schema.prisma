@@ -279,6 +279,7 @@ model Room {
   contracts     Contract[]
   meterReadings MeterReading[]
   invoices      Invoice[]
+  invites       RoomInvite[]
 
   @@unique([buildingId, number])
   @@index([roomTypeId, status])
@@ -331,16 +332,19 @@ model Contract {
 model RoomInvite {
   id         String       @id @default(cuid())
   storeId    String
-  contractId String
+  contractId String?
+  roomId     String?
   tokenHash  String       @unique
   status     InviteStatus @default(PENDING)
   expiresAt  DateTime
   claimedAt  DateTime?
   createdAt  DateTime     @default(now())
   store      Store        @relation(fields: [storeId], references: [id])
-  contract   Contract     @relation(fields: [contractId], references: [id])
+  contract   Contract?    @relation(fields: [contractId], references: [id])
+  room       Room?        @relation(fields: [roomId], references: [id])
 
   @@index([storeId, contractId, status])
+  @@index([storeId, roomId, status])
 }
 
 model MeterReading {

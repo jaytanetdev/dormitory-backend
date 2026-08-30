@@ -5,8 +5,7 @@ import { createHash } from 'crypto';
 import { ContractStatus, InvoiceStatus, PaymentStatus, RoomStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ResidentUser } from '../common/request-user';
-import { MiniPaymentDto } from './miniapp.dto';
-import { ClaimBranchRoomDto } from './miniapp.dto';
+import { ClaimBranchRoomDto, ClaimRoomInviteDto, MiniPaymentDto } from './miniapp.dto';
 import { LineService } from '../line/line.service';
 import QRCode from 'qrcode';
 import { generatePromptPayPayload } from '../payments/promptpay';
@@ -47,14 +46,49 @@ export class MiniappService {
       return { ...(await this.issue(resident, identity.lineUserId)), resident: { id: resident.id, fullName: resident.fullName }, room: { id: room.id, number: room.number }, branch: { id: branch.id, name: branch.name } };
     });
   }
-  async invite(token: string) { const invite = await this.findInvite(token); return { expiresAt: invite.expiresAt, room: { number: invite.contract.room.number }, property: { name: invite.contract.room.building.property.name }, residentHint: invite.contract.resident.fullName.replace(/.(?=.{2})/g, '*') }; }
-  async claim(token: string, idToken: string) {
-    const invite = await this.findInvite(token); const integration = await this.integrationForBranch(invite.contract.branchId); const line = await this.line.verifyIdToken(integration.id, idToken);
-    const identity = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.roomInvite.updateMany({ where: { id: invite.id, status: 'PENDING', expiresAt: { gt: new Date() } }, data: { status: 'CLAIMED', claimedAt: new Date() } }); if (claimed.count !== 1) throw new GoneException('Invite already claimed or expired');
-      return tx.lineIdentity.upsert({ where: { residentId: invite.contract.residentId }, create: { residentId: invite.contract.residentId, lineUserId: line.sub, displayName: line.name, pictureUrl: line.picture, lineIntegrationId: integration.id }, update: { lineUserId: line.sub, displayName: line.name, pictureUrl: line.picture, lineIntegrationId: integration.id, linkedAt: new Date() } });
+  async invite(token: string) {
+    const invite = await this.findInvite(token);
+    const room = invite.room ?? invite.contract?.room;
+    if (!room) throw new GoneException('Invite has no room');
+    return {
+      expiresAt: invite.expiresAt,
+      room: { number: room.number },
+      property: { name: room.building.property.name },
+      branch: { name: room.building.property.branch.name, address: room.building.property.branch.address, phone: room.building.property.branch.phone },
+      residentHint: invite.contract?.resident.fullName.replace(/.(?=.{2})/g, '*'),
+    };
+  }
+  async claim(token: string, dto: ClaimRoomInviteDto) {
+    const invite = await this.findInvite(token);
+    const room = invite.room ?? invite.contract?.room;
+    if (!room) throw new GoneException('Invite has no room');
+    const branch = room.building.property.branch;
+    const integration = await this.integrationForBranch(branch.id);
+    const line = await this.line.verifyIdToken(integration.id, dto.idToken);
+
+    if (invite.contract) {
+      const identity = await this.prisma.$transaction(async (tx) => {
+        const claimed = await tx.roomInvite.updateMany({ where: { id: invite.id, status: 'PENDING', expiresAt: { gt: new Date() } }, data: { status: 'CLAIMED', claimedAt: new Date() } });
+        if (claimed.count !== 1) throw new GoneException('Invite already claimed or expired');
+        return tx.lineIdentity.upsert({ where: { residentId: invite.contract!.residentId }, create: { residentId: invite.contract!.residentId, lineUserId: line.sub, displayName: line.name, pictureUrl: line.picture, lineIntegrationId: integration.id }, update: { lineUserId: line.sub, displayName: line.name, pictureUrl: line.picture, lineIntegrationId: integration.id, linkedAt: new Date() } });
+      });
+      return { ...(await this.issue(invite.contract.resident, identity.lineUserId)), resident: { id: invite.contract.resident.id, fullName: invite.contract.resident.fullName }, room: { id: room.id, number: room.number } };
+    }
+
+    const existingIdentity = await this.prisma.lineIdentity.findUnique({ where: { lineUserId: line.sub }, include: { resident: { include: { contracts: { where: { status: ContractStatus.ACTIVE }, select: { id: true } } } } } });
+    if (existingIdentity?.resident.contracts.length) throw new ConflictException('This LINE account already has an active room');
+    const result = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.roomInvite.updateMany({ where: { id: invite.id, status: 'PENDING', expiresAt: { gt: new Date() } }, data: { status: 'CLAIMED', claimedAt: new Date() } });
+      if (claimed.count !== 1) throw new GoneException('Invite already claimed or expired');
+      const occupied = await tx.room.updateMany({ where: { id: room.id, status: RoomStatus.VACANT, deletedAt: null }, data: { status: RoomStatus.OCCUPIED } });
+      if (occupied.count !== 1) throw new ConflictException('Room is no longer vacant');
+      const resident = await tx.resident.create({ data: { storeId: invite.storeId, branchId: branch.id, fullName: dto.fullName.trim(), phone: dto.phone?.trim(), email: dto.email?.trim() } });
+      const contract = await tx.contract.create({ data: { storeId: invite.storeId, branchId: branch.id, roomId: room.id, residentId: resident.id, startDate: new Date(), monthlyRent: room.monthlyRent, deposit: 0, billingDay: 1, status: ContractStatus.ACTIVE } });
+      const identity = await tx.lineIdentity.upsert({ where: { lineUserId: line.sub }, create: { residentId: resident.id, lineUserId: line.sub, displayName: line.name, pictureUrl: line.picture, lineIntegrationId: integration.id }, update: { residentId: resident.id, displayName: line.name, pictureUrl: line.picture, lineIntegrationId: integration.id, linkedAt: new Date() } });
+      await tx.auditLog.create({ data: { storeId: invite.storeId, action: 'resident.room_invite_claim', entityType: 'Contract', entityId: contract.id, metadata: { inviteId: invite.id, branchId: branch.id, roomId: room.id, residentId: resident.id } } });
+      return { resident, identity };
     });
-    return { ...(await this.issue(invite.contract.resident, identity.lineUserId)), resident: { id: invite.contract.resident.id, fullName: invite.contract.resident.fullName }, room: { id: invite.contract.room.id, number: invite.contract.room.number } };
+    return { ...(await this.issue(result.resident, result.identity.lineUserId)), resident: { id: result.resident.id, fullName: result.resident.fullName }, room: { id: room.id, number: room.number }, branch: { id: branch.id, name: branch.name } };
   }
   me(user: ResidentUser) { return this.prisma.resident.findFirstOrThrow({ where: { id: user.residentId, storeId: user.storeId, branchId: user.branchId }, select: { id: true, fullName: true, phone: true, email: true, branch: { select: { id: true, name: true } }, contracts: { where: { status: 'ACTIVE' }, select: { id: true, startDate: true, monthlyRent: true, room: { select: { id: true, number: true, building: { select: { name: true, property: { select: { name: true } } } } } } } } } }); }
   invoices(user: ResidentUser) { return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId } }, select: { id: true, number: true, status: true, total: true, dueDate: true, issuedAt: true, paidAt: true, room: { select: { number: true } }, period: { select: { year: true, month: true } }, payments: { where: { status: 'APPROVED' }, select: { amount: true } } }, orderBy: { dueDate: 'desc' } }); }
@@ -105,7 +139,18 @@ export class MiniappService {
     return result.secure_url;
   }
   private async issue(resident: { id: string; storeId: string; branchId: string }, lineUserId: string) { return { accessToken: await this.jwt.signAsync({ sub: resident.id, storeId: resident.storeId, branchId: resident.branchId, lineUserId, type: 'resident' }, { secret: this.config.getOrThrow('JWT_RESIDENT_SECRET'), expiresIn: 3600 }), expiresInSeconds: 3600 }; }
-  private async findInvite(token: string) { const invite = await this.prisma.roomInvite.findUnique({ where: { tokenHash: createHash('sha256').update(token).digest('hex') }, include: { contract: { include: { resident: true, room: { include: { building: { include: { property: true } } } } } } } }); if (!invite || invite.status !== 'PENDING' || invite.expiresAt <= new Date()) throw new GoneException('Invite invalid or expired'); return invite; }
+  private async findInvite(token: string) {
+    const roomInclude = { building: { include: { property: { include: { branch: true } } } } } as const;
+    const invite = await this.prisma.roomInvite.findUnique({
+      where: { tokenHash: createHash('sha256').update(token).digest('hex') },
+      include: {
+        room: { include: roomInclude },
+        contract: { include: { resident: true, room: { include: roomInclude } } },
+      },
+    });
+    if (!invite || invite.status !== 'PENDING' || invite.expiresAt <= new Date()) throw new GoneException('Invite invalid or expired');
+    return invite;
+  }
   private async integrationForBranch(branchId: string) { const integration = await this.prisma.lineIntegration.findFirst({ where: { branchId, isActive: true } }); if (!integration) throw new NotFoundException('LINE integration is not configured for branch'); return integration; }
   private mockLineId(idToken: string): string | undefined { return this.config.get('NODE_ENV') !== 'production' && idToken.startsWith('mock-line:') ? idToken.slice(10) : undefined; }
   private async findIdentityByVerifiedToken(idToken: string) {

@@ -15,6 +15,7 @@ export class OperationsController {
   @Post('room-types') @RequirePermissions('room.create') createRoomType(@CurrentUser() u: RequestUser, @Body() d: CreateRoomTypeDto) { return this.service.createRoomType(u, d); }
   @Post('buildings/:buildingId/rooms') @RequirePermissions('room.create') createRoom(@CurrentUser() u: RequestUser, @Param('buildingId') id: string, @Body() d: CreateRoomDto) { return this.service.createRoom(u, id, d); }
   @Patch('rooms/:roomId/status') @RequirePermissions('room.update') updateRoom(@CurrentUser() u: RequestUser, @Param('roomId') id: string, @Body() d: UpdateRoomStatusDto) { return this.service.updateRoomStatus(u, id, d.status); }
+  @Post('rooms/:roomId/invites') @RequirePermissions('contract.invite') roomInvite(@CurrentUser() u: RequestUser, @Param('roomId') id: string, @Body() d: CreateInviteDto) { return this.service.createRoomInvite(u, id, d); }
   @Get('branches/:branchId/residents') @RequirePermissions('resident.view') @BranchScoped() residents(@CurrentUser() u: RequestUser, @Param('branchId') id: string) { return this.service.residents(u, id); }
   @Post('residents') @RequirePermissions('resident.create') @BranchScoped() createResident(@CurrentUser() u: RequestUser, @Body() d: CreateResidentDto) { return this.service.createResident(u, d); }
   @Get('branches/:branchId/contracts') @RequirePermissions('contract.view') @BranchScoped() contracts(@CurrentUser() u: RequestUser, @Param('branchId') id: string) { return this.service.contracts(u, id); }

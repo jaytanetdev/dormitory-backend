@@ -22,6 +22,23 @@ export class OperationsService {
     return this.prisma.room.create({ data: { buildingId, ...dto } });
   }
   async updateRoomStatus(user: RequestUser, roomId: string, status: RoomStatus) { const room = await this.assertRoom(user.storeId, roomId); assertBranchAccess(user, room.building.property.branchId); return this.prisma.room.update({ where: { id: roomId }, data: { status } }); }
+  async createRoomInvite(user: RequestUser, roomId: string, dto: CreateInviteDto) {
+    const room = await this.assertRoom(user.storeId, roomId);
+    const branchId = room.building.property.branchId;
+    assertBranchAccess(user, branchId);
+    if (room.status !== RoomStatus.VACANT) throw new ConflictException('Only vacant rooms can create an invite');
+    const integration = await this.prisma.lineIntegration.findFirst({ where: { branchId, isActive: true }, select: { liffId: true } });
+    if (!integration) throw new ConflictException('LINE Mini App is not configured for this branch');
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + dto.expiresInHours * 3_600_000);
+    const invite = await this.prisma.$transaction(async (tx) => {
+      await tx.roomInvite.updateMany({ where: { roomId, status: 'PENDING' }, data: { status: 'REVOKED' } });
+      const created = await tx.roomInvite.create({ data: { storeId: user.storeId, roomId, tokenHash: this.hashToken(token), expiresAt } });
+      await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'room.invite.create', entityType: 'RoomInvite', entityId: created.id, metadata: { roomId, branchId, expiresAt } } });
+      return created;
+    });
+    return { id: invite.id, roomId, roomNumber: room.number, expiresAt, claimUrl: `https://miniapp.line.me/${encodeURIComponent(integration.liffId)}/claim/${encodeURIComponent(token)}` };
+  }
   residents(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.resident.findMany({ where: { storeId: user.storeId, branchId, deletedAt: null }, include: { lineIdentity: true, contracts: { where: { status: ContractStatus.ACTIVE }, include: { room: true } } } }); }
   async createResident(user: RequestUser, dto: CreateResidentDto) { assertBranchAccess(user, dto.branchId); await this.assertBranch(user.storeId, dto.branchId); return this.prisma.resident.create({ data: { storeId: user.storeId, ...dto } }); }
   async createContract(user: RequestUser, dto: CreateContractDto) {

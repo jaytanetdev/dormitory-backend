@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentResident, Public, ResidentRoute } from '../common/decorators';
 import type { ResidentUser } from '../common/request-user';
-import { ClaimBranchRoomDto, LineIdTokenDto, MiniPaymentDto } from './miniapp.dto';
+import { ClaimBranchRoomDto, ClaimRoomInviteDto, LineIdTokenDto, MiniPaymentDto } from './miniapp.dto';
 import { ResidentJwtGuard } from './resident-jwt.guard';
 import { MiniappService } from './miniapp.service';
 type UploadedSlip = { buffer: Buffer; mimetype: string; originalname: string; size: number };
@@ -14,7 +14,7 @@ export class MiniappController {
   @Public() @Get('branches/:claimCode') branchClaimInfo(@Param('claimCode') claimCode: string) { return this.service.branchClaimInfo(claimCode); }
   @Public() @Post('branches/:claimCode/claim') branchClaim(@Param('claimCode') claimCode: string, @Body() dto: ClaimBranchRoomDto) { return this.service.claimBranchRoom(claimCode, dto); }
   @Public() @Get('invites/:token') invite(@Param('token') token: string) { return this.service.invite(token); }
-  @Public() @Post('invites/:token/claim') claim(@Param('token') token: string, @Body() dto: LineIdTokenDto) { return this.service.claim(token, dto.idToken); }
+  @Public() @Post('invites/:token/claim') claim(@Param('token') token: string, @Body() dto: ClaimRoomInviteDto) { return this.service.claim(token, dto); }
   @ApiBearerAuth() @Get('me') me(@CurrentResident() user: ResidentUser) { return this.service.me(user); }
   @ApiBearerAuth() @Get('invoices') invoices(@CurrentResident() user: ResidentUser) { return this.service.invoices(user); }
   @ApiBearerAuth() @Get('invoices/:id') invoice(@CurrentResident() user: ResidentUser, @Param('id') id: string) { return this.service.invoice(user, id); }
