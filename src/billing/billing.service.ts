@@ -30,11 +30,15 @@ export class BillingService {
     catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Invoice already exists for contract and period, or number is duplicated'); throw error; }
   }
   async issueInvoice(user: RequestUser, invoiceId: string) {
-    const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId, storeId: user.storeId }, include: { room: true, contract: { include: { resident: true } } } }); if (!invoice) throw new NotFoundException('Invoice not found'); assertBranchAccess(user, invoice.branchId);
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId, storeId: user.storeId }, include: { room: true, branch: { include: { lineIntegration: true } }, contract: { include: { resident: true } } } }); if (!invoice) throw new NotFoundException('Invoice not found'); assertBranchAccess(user, invoice.branchId);
     if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException('Only draft invoice can be issued');
     const updated = await this.prisma.$transaction(async (tx) => { const issued = await tx.invoice.update({ where: { id: invoice.id }, data: { status: InvoiceStatus.ISSUED, issuedAt: new Date() } }); await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'invoice.issue', entityType: 'Invoice', entityId: invoice.id, metadata: { number: invoice.number, total: invoice.total.toString() } } }); return issued; });
     let notification: object = { status: 'SKIPPED', reason: 'LINE_NOT_LINKED' };
-    try { notification = await this.line.sendToResident(user.storeId, invoice.branchId, invoice.contract.residentId, 'invoice-issued', { invoiceId, roomNumber: invoice.room.number, total: invoice.total.toString(), dueDate: invoice.dueDate.toISOString(), url: `${this.config.get('PUBLIC_APP_URL')}/invoices/${invoiceId}` }); } catch { /* issuance must succeed even without a LINE identity */ }
+    const liffId = invoice.branch.lineIntegration?.liffId;
+    const invoiceUrl = liffId
+      ? `https://miniapp.line.me/${encodeURIComponent(liffId)}/invoices/${encodeURIComponent(invoiceId)}?liffId=${encodeURIComponent(liffId)}`
+      : `${this.config.get('PUBLIC_APP_URL')}/invoices/${invoiceId}`;
+    try { notification = await this.line.sendToResident(user.storeId, invoice.branchId, invoice.contract.residentId, 'invoice-issued', { invoiceId, roomNumber: invoice.room.number, total: invoice.total.toString(), dueDate: invoice.dueDate.toISOString(), url: invoiceUrl }); } catch { /* issuance must succeed even without a LINE identity */ }
     return { invoice: updated, notification };
   }
 }
