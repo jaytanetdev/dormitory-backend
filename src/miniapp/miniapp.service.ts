@@ -10,6 +10,7 @@ import { ClaimBranchRoomDto } from './miniapp.dto';
 import { LineService } from '../line/line.service';
 import QRCode from 'qrcode';
 import { generatePromptPayPayload } from '../payments/promptpay';
+type UploadedSlip = { buffer: Buffer; mimetype: string; originalname: string; size: number };
 @Injectable()
 export class MiniappService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly jwt: JwtService, private readonly line: LineService) {}
@@ -76,6 +77,11 @@ export class MiniappService {
     const invoice = await this.prisma.invoice.findFirst({ where: { id: dto.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { payments: { where: { status: PaymentStatus.APPROVED } } } }); if (!invoice) throw new NotFoundException('Payable invoice not found');
     const approved = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0); const outstanding = Math.max(0, Number(invoice.total) - approved); if (dto.amount > outstanding) throw new ConflictException('Payment exceeds outstanding balance');
     return this.prisma.payment.create({ data: { storeId: user.storeId, branchId: user.branchId, invoiceId: invoice.id, amount: dto.amount, paidAt: new Date(dto.paidAt), slip: { create: { fileUrl: dto.fileUrl, fileName: dto.fileName, mimeType: dto.mimeType, size: dto.size } } }, include: { slip: true } });
+  }
+  async uploadSlip(user: ResidentUser, file: UploadedSlip | undefined, body: { invoiceId: string; amount: string; paidAt: string }) {
+    if (!file) throw new NotFoundException('Slip image is required');
+    const fileUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    return this.payment(user, { invoiceId: body.invoiceId, amount: Number(body.amount), paidAt: body.paidAt, fileUrl, fileName: file.originalname, mimeType: file.mimetype, size: file.size });
   }
   private async issue(resident: { id: string; storeId: string; branchId: string }, lineUserId: string) { return { accessToken: await this.jwt.signAsync({ sub: resident.id, storeId: resident.storeId, branchId: resident.branchId, lineUserId, type: 'resident' }, { secret: this.config.getOrThrow('JWT_RESIDENT_SECRET'), expiresIn: 3600 }), expiresInSeconds: 3600 }; }
   private async findInvite(token: string) { const invite = await this.prisma.roomInvite.findUnique({ where: { tokenHash: createHash('sha256').update(token).digest('hex') }, include: { contract: { include: { resident: true, room: { include: { building: { include: { property: true } } } } } } } }); if (!invite || invite.status !== 'PENDING' || invite.expiresAt <= new Date()) throw new GoneException('Invite invalid or expired'); return invite; }
