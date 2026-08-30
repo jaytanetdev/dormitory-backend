@@ -40,7 +40,7 @@ export class OperationsService {
     const encodedLiffId = encodeURIComponent(integration.liffId);
     return { id: invite.id, roomId, roomNumber: room.number, expiresAt, claimUrl: `https://miniapp.line.me/${encodedLiffId}/claim/${encodeURIComponent(token)}?liffId=${encodedLiffId}` };
   }
-  residents(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.resident.findMany({ where: { storeId: user.storeId, branchId, deletedAt: null }, include: { lineIdentity: true, contracts: { where: { status: ContractStatus.ACTIVE }, include: { room: true } } } }); }
+  residents(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.resident.findMany({ where: { storeId: user.storeId, branchId, deletedAt: null }, include: { lineIdentity: true, contracts: { include: { room: true }, orderBy: { createdAt: 'desc' }, take: 1 } } }); }
   async createResident(user: RequestUser, dto: CreateResidentDto) { assertBranchAccess(user, dto.branchId); await this.assertBranch(user.storeId, dto.branchId); return this.prisma.resident.create({ data: { storeId: user.storeId, ...dto } }); }
   async createContract(user: RequestUser, dto: CreateContractDto) {
     assertBranchAccess(user, dto.branchId);
@@ -56,9 +56,18 @@ export class OperationsService {
     });
   }
   contracts(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.contract.findMany({ where: { storeId: user.storeId, branchId }, include: { room: true, resident: { include: { lineIdentity: true } } }, orderBy: { createdAt: 'desc' } }); }
-  async setContractStatus(user: RequestUser, id: string, status: ContractStatus) {
+  async setContractStatus(user: RequestUser, id: string, status: ContractStatus, endDate?: string) {
     const contract = await this.prisma.contract.findFirst({ where: { id, storeId: user.storeId } }); if (!contract) throw new NotFoundException('Contract not found'); assertBranchAccess(user, contract.branchId);
-    return this.prisma.$transaction(async (tx) => { const updated = await tx.contract.update({ where: { id }, data: { status } }); if (status === ContractStatus.ENDED || status === ContractStatus.CANCELLED) await tx.room.update({ where: { id: contract.roomId }, data: { status: RoomStatus.VACANT } }); await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'contract.status.update', entityType: 'Contract', entityId: id, metadata: { status } } }); return updated; });
+    const isMoveOut = status === ContractStatus.ENDED || status === ContractStatus.CANCELLED;
+    if (isMoveOut && contract.status !== ContractStatus.ACTIVE) throw new ConflictException('Only an active contract can be ended');
+    const effectiveEndDate = isMoveOut ? new Date(endDate ?? Date.now()) : undefined;
+    if (effectiveEndDate && effectiveEndDate < contract.startDate) throw new BadRequestException('Move-out date cannot be before contract start date');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.contract.update({ where: { id }, data: { status, ...(effectiveEndDate ? { endDate: effectiveEndDate } : {}) } });
+      if (isMoveOut) await tx.room.update({ where: { id: contract.roomId }, data: { status: RoomStatus.VACANT } });
+      await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: isMoveOut ? 'contract.move_out' : 'contract.status.update', entityType: 'Contract', entityId: id, metadata: { status, endDate: effectiveEndDate?.toISOString(), roomId: contract.roomId } } });
+      return updated;
+    });
   }
   async createInvite(user: RequestUser, contractId: string, dto: CreateInviteDto) {
     const contract = await this.prisma.contract.findFirst({ where: { id: contractId, storeId: user.storeId, status: ContractStatus.ACTIVE } }); if (!contract) throw new NotFoundException('Active contract not found'); assertBranchAccess(user, contract.branchId);

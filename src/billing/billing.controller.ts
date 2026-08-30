@@ -9,6 +9,7 @@ import { CreateBillingPeriodDto, CreateInvoiceDto, CreateMeterReadingDto } from 
 export class BillingController {
   constructor(private readonly service: BillingService) {}
   @Post('meter-readings') @RequirePermissions('meter.create') createReading(@CurrentUser() u: RequestUser, @Body() d: CreateMeterReadingDto) { return this.service.createMeterReading(u, d); }
+  @Get('rooms/:roomId/meter-readings/latest') @RequirePermissions('meter.view') latestReadings(@CurrentUser() u: RequestUser, @Param('roomId') id: string) { return this.service.latestMeterReadings(u, id); }
   @Post('branches/:branchId/billing-periods') @RequirePermissions('invoice.create') @BranchScoped() period(@CurrentUser() u: RequestUser, @Param('branchId') id: string, @Body() d: CreateBillingPeriodDto) { return this.service.createPeriod(u, id, d); }
   @Get('branches/:branchId/invoices') @RequirePermissions('invoice.view') @BranchScoped() invoices(@CurrentUser() u: RequestUser, @Param('branchId') id: string) { return this.service.listInvoices(u, id); }
   @Post('invoices') @RequirePermissions('invoice.create') @BranchScoped() createInvoice(@CurrentUser() u: RequestUser, @Body() d: CreateInvoiceDto) { return this.service.createInvoice(u, d); }

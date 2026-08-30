@@ -12,5 +12,5 @@ export class CreateContractDto {
   @IsString() branchId!: string; @IsString() roomId!: string; @IsString() residentId!: string; @IsDateString() startDate!: string; @IsOptional() @IsDateString() endDate?: string;
   @Type(() => Number) @IsNumber() @IsPositive() monthlyRent!: number; @Type(() => Number) @IsNumber() @Min(0) deposit!: number; @Type(() => Number) @IsInt() @Min(1) @Max(28) billingDay!: number;
 }
-export class UpdateContractStatusDto { @IsEnum(ContractStatus) status!: ContractStatus; }
+export class UpdateContractStatusDto { @IsEnum(ContractStatus) status!: ContractStatus; @IsOptional() @IsDateString() endDate?: string; }
 export class CreateInviteDto { @Type(() => Number) @IsInt() @Min(1) @Max(168) expiresInHours = 48; }

@@ -20,6 +20,6 @@ export class OperationsController {
   @Post('residents') @RequirePermissions('resident.create') @BranchScoped() createResident(@CurrentUser() u: RequestUser, @Body() d: CreateResidentDto) { return this.service.createResident(u, d); }
   @Get('branches/:branchId/contracts') @RequirePermissions('contract.view') @BranchScoped() contracts(@CurrentUser() u: RequestUser, @Param('branchId') id: string) { return this.service.contracts(u, id); }
   @Post('contracts') @RequirePermissions('contract.create') @BranchScoped() createContract(@CurrentUser() u: RequestUser, @Body() d: CreateContractDto) { return this.service.createContract(u, d); }
-  @Patch('contracts/:contractId/status') @RequirePermissions('contract.update') setContract(@CurrentUser() u: RequestUser, @Param('contractId') id: string, @Body() d: UpdateContractStatusDto) { return this.service.setContractStatus(u, id, d.status); }
+  @Patch('contracts/:contractId/status') @RequirePermissions('contract.update') setContract(@CurrentUser() u: RequestUser, @Param('contractId') id: string, @Body() d: UpdateContractStatusDto) { return this.service.setContractStatus(u, id, d.status, d.endDate); }
   @Post('contracts/:contractId/invites') @RequirePermissions('contract.invite') invite(@CurrentUser() u: RequestUser, @Param('contractId') id: string, @Body() d: CreateInviteDto) { return this.service.createInvite(u, id, d); }
 }
