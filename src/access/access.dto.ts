@@ -3,10 +3,11 @@ import { ArrayUnique, IsArray, IsBoolean, IsEmail, IsOptional, IsString, MinLeng
 
 export class CreateBranchDto {
   @IsString() name!: string; @IsString() code!: string; @IsOptional() @IsString() address?: string; @IsOptional() @IsString() phone?: string;
-  @IsString() lineDisplayName!: string; @IsString() lineChannelAccessToken!: string; @IsString() lineChannelSecret!: string;
-  @IsString() lineLoginChannelId!: string; @IsString() lineLiffId!: string;
+  @IsString() lineDisplayName!: string; @IsOptional() @IsString() lineChannelAccessToken?: string; @IsOptional() @IsString() lineChannelSecret?: string;
+  @IsOptional() @IsString() lineLoginChannelId?: string; @IsString() lineLiffId!: string;
   @IsOptional() @IsString() lineMiniAppChannelId?: string; @IsOptional() @IsString() lineMiniAppChannelSecret?: string;
   @IsOptional() @IsString() lineMessagingChannelId?: string; @IsOptional() @IsString() lineMessagingChannelSecret?: string;
+  @IsOptional() @IsString() lineMessagingAccessToken?: string; @IsOptional() @IsString() lineMessagingSecret?: string;
 }
 export class UpdateBranchDto {
   @IsString() name!: string; @IsOptional() @IsString() address?: string; @IsOptional() @IsString() phone?: string;
@@ -14,6 +15,7 @@ export class UpdateBranchDto {
   @IsOptional() @IsString() lineLoginChannelId?: string; @IsOptional() @IsString() lineLiffId?: string; @IsOptional() @IsBoolean() lineIsActive?: boolean;
   @IsOptional() @IsString() lineMiniAppChannelId?: string; @IsOptional() @IsString() lineMiniAppChannelSecret?: string;
   @IsOptional() @IsString() lineMessagingChannelId?: string; @IsOptional() @IsString() lineMessagingChannelSecret?: string;
+  @IsOptional() @IsString() lineMessagingAccessToken?: string; @IsOptional() @IsString() lineMessagingSecret?: string;
 }
 export class CreateRoleDto { @IsString() name!: string; @IsOptional() @IsString() description?: string; @IsArray() @ArrayUnique() @IsString({ each: true }) permissionKeys!: string[]; }
 export class UpdateRolePermissionsDto { @IsArray() @ArrayUnique() @IsString({ each: true }) permissionKeys!: string[]; }
