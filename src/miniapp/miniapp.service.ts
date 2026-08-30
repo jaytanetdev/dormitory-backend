@@ -1,4 +1,4 @@
-import { ConflictException, GoneException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, ConflictException, GoneException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'crypto';
@@ -114,8 +114,13 @@ export class MiniappService {
   }
   async uploadSlip(user: ResidentUser, file: UploadedSlip | undefined, body: { invoiceId: string; amount: string; paidAt: string }) {
     if (!file) throw new NotFoundException('Slip image is required');
-    const invoice = await this.prisma.invoice.findFirst({ where: { id: body.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId } }, include: { branch: true, room: true } });
-    if (!invoice) throw new NotFoundException('Invoice not found');
+    if (!['image/jpeg', 'image/png'].includes(file.mimetype)) throw new BadRequestException('Slip must be a JPG or PNG image');
+    if (!Number.isFinite(Number(body.amount)) || Number(body.amount) <= 0) throw new BadRequestException('Payment amount is invalid');
+    if (Number.isNaN(new Date(body.paidAt).getTime())) throw new BadRequestException('Payment date is invalid');
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: body.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { branch: true, room: true, payments: { where: { status: PaymentStatus.APPROVED }, select: { amount: true } } } });
+    if (!invoice) throw new NotFoundException('Payable invoice not found');
+    const outstanding = Math.max(0, Number(invoice.total) - invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0));
+    if (Number(body.amount) > outstanding) throw new ConflictException('Payment exceeds outstanding balance');
     const fileUrl = await this.uploadToCloudinary(file, invoice.branch.code, invoice.room.number);
     return this.payment(user, { invoiceId: body.invoiceId, amount: Number(body.amount), paidAt: body.paidAt, fileUrl, fileName: file.originalname, mimeType: file.mimetype, size: file.size });
   }
@@ -133,7 +138,11 @@ export class MiniappService {
     form.append('file', new Blob([file.buffer as unknown as ArrayBuffer], { type: file.mimetype }), file.originalname);
     form.append('api_key', apiKey); form.append('timestamp', timestamp); form.append('folder', folder); form.append('signature', signature);
     const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`, { method: 'POST', body: form });
-    if (!response.ok) throw new ConflictException('Cloudinary upload failed');
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      const message = body?.error?.message ?? `Cloudinary returned HTTP ${response.status}`;
+      throw new BadGatewayException(`Cloudinary upload failed: ${message}`);
+    }
     const result = await response.json() as { secure_url?: string };
     if (!result.secure_url) throw new ConflictException('Cloudinary did not return a file URL');
     return result.secure_url;
