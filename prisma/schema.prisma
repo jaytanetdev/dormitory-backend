@@ -1,0 +1,507 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum RoomStatus {
+  VACANT
+  OCCUPIED
+  RESERVED
+  MAINTENANCE
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum InviteStatus {
+  PENDING
+  CLAIMED
+  REVOKED
+  EXPIRED
+}
+
+enum MeterType {
+  WATER
+  ELECTRIC
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PENDING_REVIEW
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PromptPayType {
+  PHONE
+  NATIONAL_ID
+  TAX_ID
+  EWALLET
+}
+
+enum NotificationStatus {
+  SKIPPED
+  SENT
+  FAILED
+}
+
+model Store {
+  id         String          @id @default(cuid())
+  name       String
+  slug       String          @unique
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  deletedAt  DateTime?
+  branches   Branch[]
+  users      User[]
+  roles      Role[]
+  properties Property[]
+  residents  Resident[]
+  contracts  Contract[]
+  invites    RoomInvite[]
+  periods    BillingPeriod[]
+  invoices   Invoice[]
+  payments   Payment[]
+  auditLogs  AuditLog[]
+}
+
+model Branch {
+  id               String            @id @default(cuid())
+  storeId          String
+  name             String
+  code             String
+  address          String?
+  phone            String?
+  claimCode        String            @unique @default(uuid())
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
+  store            Store             @relation(fields: [storeId], references: [id])
+  users            UserBranch[]
+  properties       Property[]
+  residents        Resident[]
+  contracts        Contract[]
+  periods          BillingPeriod[]
+  invoices         Invoice[]
+  payments         Payment[]
+  promptPaySetting PromptPaySetting?
+  lineIntegration  LineIntegration?
+
+  @@unique([storeId, code])
+  @@index([storeId])
+}
+
+model LineIntegration {
+  id                            String   @id @default(cuid())
+  branchId                      String   @unique
+  displayName                   String
+  channelAccessTokenEncrypted   String
+  channelSecretEncrypted        String
+  loginChannelId                String
+  liffId                        String
+  isActive                      Boolean  @default(true)
+  credentialVersion             Int      @default(1)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+  branch                        Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  identities                    LineIdentity[]
+
+  @@index([isActive])
+}
+
+model User {
+  id           String           @id @default(cuid())
+  storeId      String
+  roleId       String
+  email        String
+  passwordHash String
+  displayName  String
+  status       UserStatus       @default(ACTIVE)
+  allBranches  Boolean          @default(false)
+  tokenVersion    Int           @default(0)
+  isPlatformAdmin Boolean       @default(false)
+  lastLoginAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+  store        Store            @relation(fields: [storeId], references: [id])
+  role         Role             @relation(fields: [roleId], references: [id])
+  branches     UserBranch[]
+  sessions     RefreshSession[]
+  auditLogs    AuditLog[]
+
+  @@unique([storeId, email])
+  @@index([storeId, roleId])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  storeId     String
+  name        String
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+  store       Store            @relation(fields: [storeId], references: [id])
+  users       User[]
+  permissions RolePermission[]
+
+  @@unique([storeId, name])
+  @@index([storeId])
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  module      String
+  action      String
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model UserBranch {
+  userId   String
+  branchId String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@index([branchId])
+}
+
+model RefreshSession {
+  id        String    @id
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Property {
+  id        String     @id @default(cuid())
+  storeId   String
+  branchId  String
+  name      String
+  typeName  String
+  address   String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+  store     Store      @relation(fields: [storeId], references: [id])
+  branch    Branch     @relation(fields: [branchId], references: [id])
+  buildings Building[]
+
+  @@index([storeId, branchId])
+}
+
+model Building {
+  id         String    @id @default(cuid())
+  propertyId String
+  name       String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  property   Property  @relation(fields: [propertyId], references: [id])
+  rooms      Room[]
+
+  @@unique([propertyId, name])
+  @@index([propertyId])
+}
+
+model RoomType {
+  id          String    @id @default(cuid())
+  storeId     String
+  name        String
+  description String?
+  baseRent    Decimal   @db.Decimal(12, 2)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  rooms       Room[]
+
+  @@unique([storeId, name])
+  @@index([storeId])
+}
+
+model Room {
+  id            String         @id @default(cuid())
+  buildingId    String
+  roomTypeId    String
+  number        String
+  floor         String?
+  monthlyRent   Decimal        @db.Decimal(12, 2)
+  status        RoomStatus     @default(VACANT)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+  building      Building       @relation(fields: [buildingId], references: [id])
+  roomType      RoomType       @relation(fields: [roomTypeId], references: [id])
+  contracts     Contract[]
+  meterReadings MeterReading[]
+  invoices      Invoice[]
+
+  @@unique([buildingId, number])
+  @@index([roomTypeId, status])
+}
+
+model Resident {
+  id           String        @id @default(cuid())
+  storeId      String
+  branchId     String
+  fullName     String
+  phone        String?
+  email        String?
+  nationalId   String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  store        Store         @relation(fields: [storeId], references: [id])
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  contracts    Contract[]
+  lineIdentity LineIdentity?
+
+  @@index([storeId, branchId])
+}
+
+model Contract {
+  id          String         @id @default(cuid())
+  storeId     String
+  branchId    String
+  roomId      String
+  residentId  String
+  startDate   DateTime
+  endDate     DateTime?
+  monthlyRent Decimal        @db.Decimal(12, 2)
+  deposit     Decimal        @default(0) @db.Decimal(12, 2)
+  billingDay  Int            @default(1)
+  status      ContractStatus @default(DRAFT)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  store       Store          @relation(fields: [storeId], references: [id])
+  branch      Branch         @relation(fields: [branchId], references: [id])
+  room        Room           @relation(fields: [roomId], references: [id])
+  resident    Resident       @relation(fields: [residentId], references: [id])
+  invites     RoomInvite[]
+  invoices    Invoice[]
+
+  @@index([storeId, branchId, status])
+  @@index([roomId, status])
+}
+
+model RoomInvite {
+  id         String       @id @default(cuid())
+  storeId    String
+  contractId String
+  tokenHash  String       @unique
+  status     InviteStatus @default(PENDING)
+  expiresAt  DateTime
+  claimedAt  DateTime?
+  createdAt  DateTime     @default(now())
+  store      Store        @relation(fields: [storeId], references: [id])
+  contract   Contract     @relation(fields: [contractId], references: [id])
+
+  @@index([storeId, contractId, status])
+}
+
+model MeterReading {
+  id            String    @id @default(cuid())
+  roomId        String
+  type          MeterType
+  readingDate   DateTime
+  previousValue Decimal   @db.Decimal(12, 3)
+  currentValue  Decimal   @db.Decimal(12, 3)
+  unitRate      Decimal   @db.Decimal(12, 2)
+  imageUrl      String?
+  createdAt     DateTime  @default(now())
+  room          Room      @relation(fields: [roomId], references: [id])
+
+  @@unique([roomId, type, readingDate])
+  @@index([roomId, readingDate])
+}
+
+model BillingPeriod {
+  id        String    @id @default(cuid())
+  storeId   String
+  branchId  String
+  year      Int
+  month     Int
+  dueDate   DateTime
+  createdAt DateTime  @default(now())
+  store     Store     @relation(fields: [storeId], references: [id])
+  branch    Branch    @relation(fields: [branchId], references: [id])
+  invoices  Invoice[]
+
+  @@unique([branchId, year, month])
+  @@index([storeId, branchId])
+}
+
+model Invoice {
+  id         String        @id @default(cuid())
+  storeId    String
+  branchId   String
+  periodId   String
+  contractId String
+  roomId     String
+  number     String
+  status     InvoiceStatus @default(DRAFT)
+  subtotal   Decimal       @db.Decimal(12, 2)
+  discount   Decimal       @default(0) @db.Decimal(12, 2)
+  total      Decimal       @db.Decimal(12, 2)
+  dueDate    DateTime
+  issuedAt   DateTime?
+  paidAt     DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  store      Store         @relation(fields: [storeId], references: [id])
+  branch     Branch        @relation(fields: [branchId], references: [id])
+  period     BillingPeriod @relation(fields: [periodId], references: [id])
+  contract   Contract      @relation(fields: [contractId], references: [id])
+  room       Room          @relation(fields: [roomId], references: [id])
+  items      InvoiceItem[]
+  payments   Payment[]
+
+  @@unique([branchId, number])
+  @@unique([periodId, contractId])
+  @@index([storeId, branchId, status])
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  code        String
+  description String
+  quantity    Decimal @db.Decimal(12, 3)
+  unitPrice   Decimal @db.Decimal(12, 2)
+  amount      Decimal @db.Decimal(12, 2)
+  metadata    Json?
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  storeId      String
+  branchId     String
+  invoiceId    String
+  amount       Decimal       @db.Decimal(12, 2)
+  paidAt       DateTime
+  status       PaymentStatus @default(PENDING)
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  rejectReason String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  store        Store         @relation(fields: [storeId], references: [id])
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
+  slip         PaymentSlip?
+
+  @@index([storeId, branchId, status])
+  @@index([invoiceId])
+}
+
+model PaymentSlip {
+  id        String   @id @default(cuid())
+  paymentId String   @unique
+  fileUrl   String   
+  fileName  String?
+  mimeType  String?
+  size      Int?
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+model PromptPaySetting {
+  id          String        @id @default(cuid())
+  branchId    String        @unique
+  type        PromptPayType
+  target      String
+  accountName String
+  enabled     Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  branch      Branch        @relation(fields: [branchId], references: [id])
+}
+
+model LineIdentity {
+  id            String            @id @default(cuid())
+  residentId    String            @unique
+  lineUserId    String            @unique
+  displayName   String?
+  pictureUrl    String?
+  lineIntegrationId String?
+  linkedAt      DateTime          @default(now())
+  resident      Resident          @relation(fields: [residentId], references: [id])
+  lineIntegration LineIntegration? @relation(fields: [lineIntegrationId], references: [id], onDelete: SetNull)
+  notifications NotificationLog[]
+
+  @@index([lineIntegrationId])
+}
+
+model NotificationLog {
+  id             String             @id @default(cuid())
+  lineIdentityId String
+  template       String
+  payload        Json
+  status         NotificationStatus
+  externalId     String?
+  errorCode      String?
+  createdAt      DateTime           @default(now())
+  lineIdentity   LineIdentity       @relation(fields: [lineIdentityId], references: [id])
+
+  @@index([lineIdentityId, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  storeId     String
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  store       Store    @relation(fields: [storeId], references: [id])
+  actor       User?    @relation(fields: [actorUserId], references: [id])
+
+  @@index([storeId, createdAt])
+}
