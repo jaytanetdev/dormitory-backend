@@ -25,11 +25,16 @@ export class AccessService {
     const miniAppSecret = dto.lineMiniAppChannelSecret ?? dto.lineChannelSecret;
     const miniAppChannelId = dto.lineMiniAppChannelId ?? dto.lineLoginChannelId;
     if (!accessToken || !messagingSecret || !miniAppSecret || !miniAppChannelId || !dto.lineMessagingChannelId) throw new BadRequestException('LINE Mini App and Messaging API credentials are required');
+    const requiredAccessToken = accessToken;
+    const requiredMessagingSecret = messagingSecret;
+    const requiredMiniAppSecret = miniAppSecret;
+    const requiredMiniAppChannelId = miniAppChannelId;
+    const requiredMessagingChannelId = dto.lineMessagingChannelId;
     try {
       return await this.prisma.$transaction(async (tx) => {
         const branch = await tx.branch.create({ data: {
           storeId: user.storeId, name: dto.name, code: dto.code.toUpperCase(), address: dto.address, phone: dto.phone,
-      lineIntegration: { create: { displayName: dto.lineDisplayName, channelAccessTokenEncrypted: this.credentials.encrypt(accessToken), miniAppChannelSecretEncrypted: this.credentials.encrypt(miniAppSecret), miniAppChannelId, messagingChannelSecretEncrypted: this.credentials.encrypt(messagingSecret), messagingChannelId: dto.lineMessagingChannelId, liffId: dto.lineLiffId } }
+      lineIntegration: { create: { displayName: dto.lineDisplayName, channelAccessTokenEncrypted: this.credentials.encrypt(requiredAccessToken), miniAppChannelSecretEncrypted: this.credentials.encrypt(requiredMiniAppSecret), miniAppChannelId: requiredMiniAppChannelId, messagingChannelSecretEncrypted: this.credentials.encrypt(requiredMessagingSecret), messagingChannelId: requiredMessagingChannelId, liffId: dto.lineLiffId } }
         }, include: { lineIntegration: { select: { id: true, displayName: true, miniAppChannelId: true, messagingChannelId: true, liffId: true, isActive: true, updatedAt: true } } } });
         await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'branch.create', entityType: 'Branch', entityId: branch.id, metadata: { code: branch.code, lineIntegrationId: branch.lineIntegration?.id } } });
         const appUrl = this.config.getOrThrow<string>('PUBLIC_APP_URL').replace(/\/$/, '');
