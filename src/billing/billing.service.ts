@@ -31,7 +31,7 @@ export class BillingService {
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId, storeId: user.storeId, deletedAt: null } }); if (!branch) throw new NotFoundException('Branch not found');
     return this.prisma.billingPeriod.upsert({ where: { branchId_year_month: { branchId, year: dto.year, month: dto.month } }, create: { storeId: user.storeId, branchId, ...dto, dueDate: new Date(dto.dueDate) }, update: { dueDate: new Date(dto.dueDate) } });
   }
-  listInvoices(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId }, include: { room: true, contract: { include: { resident: true } }, items: true, payments: { include: { slip: true } } }, orderBy: { createdAt: 'desc' } }); }
+  listInvoices(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId }, include: { room: true, period: true, contract: { include: { resident: true } }, items: true, payments: { include: { slip: true } } }, orderBy: { createdAt: 'desc' } }); }
   async createInvoice(user: RequestUser, dto: CreateInvoiceDto) {
     assertBranchAccess(user, dto.branchId);
     const [period, contract] = await Promise.all([this.prisma.billingPeriod.findFirst({ where: { id: dto.periodId, storeId: user.storeId, branchId: dto.branchId } }), this.prisma.contract.findFirst({ where: { id: dto.contractId, storeId: user.storeId, branchId: dto.branchId, status: 'ACTIVE' } })]);
