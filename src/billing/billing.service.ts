@@ -34,7 +34,7 @@ export class BillingService {
   listInvoices(user: RequestUser, branchId: string) { assertBranchAccess(user, branchId); return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId }, include: { room: true, period: true, contract: { include: { resident: true } }, items: true, payments: { include: { slip: true } } }, orderBy: { createdAt: 'desc' } }); }
   async createInvoice(user: RequestUser, dto: CreateInvoiceDto) {
     assertBranchAccess(user, dto.branchId);
-    const [period, contract] = await Promise.all([this.prisma.billingPeriod.findFirst({ where: { id: dto.periodId, storeId: user.storeId, branchId: dto.branchId } }), this.prisma.contract.findFirst({ where: { id: dto.contractId, storeId: user.storeId, branchId: dto.branchId, status: 'ACTIVE' } })]);
+    const [period, contract] = await Promise.all([this.prisma.billingPeriod.findFirst({ where: { id: dto.periodId, storeId: user.storeId, branchId: dto.branchId } }), this.prisma.contract.findFirst({ where: { id: dto.contractId, storeId: user.storeId, branchId: dto.branchId, status: 'ACTIVE' }, include: { branch: { select: { invoiceDueDays: true } } } })]);
     if (!period || !contract) throw new BadRequestException('Invalid billing period or active contract');
     const amounts = dto.items.map((item) => Number((item.quantity * item.unitPrice).toFixed(2))); const subtotal = amounts.reduce((sum, value) => sum + value, 0); const total = Math.max(0, subtotal - dto.discount);
     try { return await this.prisma.$transaction(async (tx) => {
@@ -49,7 +49,9 @@ export class BillingService {
         if (latest && new Date(reading.readingDate) <= latest.readingDate) throw new ConflictException(`New ${reading.type.toLowerCase()} reading date must be after the latest reading`);
         await tx.meterReading.create({ data: { roomId: contract.roomId, ...reading, readingDate: new Date(reading.readingDate) } });
       }
-      const invoice = await tx.invoice.create({ data: { storeId: user.storeId, branchId: dto.branchId, periodId: dto.periodId, contractId: dto.contractId, roomId: contract.roomId, number: dto.number, subtotal, discount: dto.discount, total, dueDate: period.dueDate, items: { create: dto.items.map((item, index) => ({ ...item, amount: amounts[index], metadata: item.metadata as Prisma.InputJsonValue | undefined })) } }, include: { items: true } });
+      const dueDate = new Date(contract.startDate);
+      dueDate.setDate(dueDate.getDate() + contract.branch.invoiceDueDays);
+      const invoice = await tx.invoice.create({ data: { storeId: user.storeId, branchId: dto.branchId, periodId: dto.periodId, contractId: dto.contractId, roomId: contract.roomId, number: dto.number, subtotal, discount: dto.discount, total, dueDate, items: { create: dto.items.map((item, index) => ({ ...item, amount: amounts[index], metadata: item.metadata as Prisma.InputJsonValue | undefined })) } }, include: { items: true } });
       await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'invoice.create', entityType: 'Invoice', entityId: invoice.id, metadata: { number: invoice.number, total: invoice.total.toString(), meterReadings: dto.meterReadings?.length ?? 0 } } });
       return invoice;
     }); }
