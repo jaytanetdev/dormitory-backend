@@ -121,7 +121,7 @@ export class MiniappService {
     const amount = Math.max(0, Number(invoice.total) - approvedAmount);
     if (amount <= 0) throw new ConflictException('Invoice has no outstanding balance');
     const payload = generatePromptPayPayload(setting.type, setting.target, amount);
-    return { invoiceId: invoice.id, amount, accountName: setting.accountName, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 480 }) };
+    return { invoiceId: invoice.id, amount, accountName: setting.accountName, promptPayTarget: setting.target, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 480 }) };
   }
   async payment(user: ResidentUser, dto: MiniPaymentDto) {
     const invoice = await this.prisma.invoice.findFirst({ where: { id: dto.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { payments: { where: { status: PaymentStatus.APPROVED } } } }); if (!invoice) throw new NotFoundException('Payable invoice not found');
