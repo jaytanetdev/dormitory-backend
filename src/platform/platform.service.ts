@@ -7,6 +7,7 @@ import { CreateStoreDto } from './platform.dto';
 @Injectable()
 export class PlatformService {
   constructor(private readonly prisma: PrismaService) {}
+  listStores() { return this.prisma.store.findMany({ where: { deletedAt: null }, include: { _count: { select: { branches: true, users: true, invoices: true } }, branches: { where: { deletedAt: null }, select: { id: true, name: true, code: true } } }, orderBy: { createdAt: 'desc' } }); }
   async createStore(actor: RequestUser, dto: CreateStoreDto) {
     try { return await this.prisma.$transaction(async (tx) => {
       const permissions = await tx.permission.findMany(); const store = await tx.store.create({ data: { name: dto.name, slug: dto.slug } });
