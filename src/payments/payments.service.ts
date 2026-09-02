@@ -17,19 +17,20 @@ export class PaymentsService {
     if (!branch) throw new NotFoundException('Branch not found');
     const setting = await this.prisma.promptPaySetting.findUnique({ where: { branchId } });
     if (!setting) return null;
-    return this.withPreview(setting, branch.invoiceDueDays);
+    return this.withPreview(setting, branch.invoiceDueDays, Number(branch.lateFeePerDay));
   }
   async upsertPromptPay(user: RequestUser, branchId: string, dto: UpsertPromptPayDto) {
     assertBranchAccess(user, branchId);
     const branch = await this.prisma.branch.findFirst({ where: { id: branchId, storeId: user.storeId, deletedAt: null } }); if (!branch) throw new NotFoundException('Branch not found');
     generatePromptPayPayload(dto.type, dto.target, 1);
     const setting = await this.prisma.promptPaySetting.upsert({ where: { branchId }, create: { branchId, ...dto }, update: { ...dto, enabled: true } });
-    return this.withPreview(setting, branch.invoiceDueDays);
+    await this.prisma.branch.update({ where: { id: branchId }, data: { invoiceDueDays: dto.invoiceDueDays, lateFeePerDay: dto.lateFeePerDay } });
+    return this.withPreview(setting, dto.invoiceDueDays, dto.lateFeePerDay);
   }
-  private async withPreview(setting: { id: string; branchId: string; type: import('@prisma/client').PromptPayType; target: string; accountName: string; enabled: boolean; createdAt: Date; updatedAt: Date }, invoiceDueDays: number) {
+  private async withPreview(setting: { id: string; branchId: string; type: import('@prisma/client').PromptPayType; target: string; accountName: string; enabled: boolean; createdAt: Date; updatedAt: Date }, invoiceDueDays: number, lateFeePerDay = 0) {
     const previewAmount = 100;
     const payload = generatePromptPayPayload(setting.type, setting.target, previewAmount);
-    return { ...setting, invoiceDueDays, previewAmount, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 360 }) };
+    return { ...setting, invoiceDueDays, lateFeePerDay, previewAmount, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 360 }) };
   }
   async qr(user: RequestUser, invoiceId: string) {
     const invoice = await this.prisma.invoice.findFirst({ where: { id: invoiceId, storeId: user.storeId, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { branch: { include: { promptPaySetting: true } }, payments: { where: { status: PaymentStatus.APPROVED } } } }); if (!invoice) throw new NotFoundException('Payable invoice not found'); assertBranchAccess(user, invoice.branchId);
@@ -52,9 +53,14 @@ export class PaymentsService {
       const approved = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
       const aggregate = await tx.payment.aggregate({ where: { invoiceId: payment.invoiceId, status: PaymentStatus.APPROVED }, _sum: { amount: true } });
       const paid = Number(aggregate._sum.amount ?? 0); const fullyPaid = paid >= Number(payment.invoice.total);
+      const lateDays = Math.max(0, Math.ceil((payment.paidAt.getTime() - payment.invoice.dueDate.getTime()) / 86400000));
+      const branch = await tx.branch.findUniqueOrThrow({ where: { id: payment.branchId }, select: { lateFeePerDay: true } });
+      const lateFee = lateDays * Number(branch.lateFeePerDay);
+      const receiptCount = await tx.receipt.count({ where: { branchId: payment.branchId } });
+      const receipt = await tx.receipt.create({ data: { storeId: payment.storeId, branchId: payment.branchId, invoiceId: payment.invoiceId, paymentId: payment.id, number: `RC-${new Date().getFullYear()}-${String(receiptCount + 1).padStart(6, '0')}`, amount: payment.amount, lateFee, totalAmount: Number(payment.amount) + lateFee } });
       await tx.invoice.update({ where: { id: payment.invoiceId }, data: { status: fullyPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID, paidAt: fullyPaid ? new Date() : null } });
       await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'payment.approve', entityType: 'Payment', entityId: payment.id, metadata: { invoiceId: payment.invoiceId, amount: payment.amount.toString() } } });
-      return { payment: approved, invoiceStatus: fullyPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID, approvedTotal: paid, invoice: payment.invoice, remaining: Math.max(0, Number(payment.invoice.total) - paid) };
+      return { payment: approved, receipt, lateDays, invoiceStatus: fullyPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID, approvedTotal: paid, invoice: payment.invoice, remaining: Math.max(0, Number(payment.invoice.total) - paid) };
     });
     let notification: object = { status: 'SKIPPED', reason: 'LINE_NOT_LINKED' };
     try {
@@ -65,9 +71,11 @@ export class PaymentsService {
         approvedTotal: result.approvedTotal,
         remaining: result.remaining,
         fullyPaid: result.invoiceStatus === InvoiceStatus.PAID,
+        receiptNumber: result.receipt.number,
+        receiptTotal: result.receipt.totalAmount.toString(),
       });
     } catch { /* payment approval must succeed even if LINE cannot be reached */ }
-    return { payment: result.payment, invoiceStatus: result.invoiceStatus, approvedTotal: result.approvedTotal, notification };
+    return { payment: result.payment, receipt: result.receipt, lateDays: result.lateDays, invoiceStatus: result.invoiceStatus, approvedTotal: result.approvedTotal, notification };
   }
   async reject(user: RequestUser, paymentId: string, reason: string) {
     const payment = await this.prisma.payment.findFirst({ where: { id: paymentId, storeId: user.storeId } }); if (!payment) throw new NotFoundException('Payment not found'); assertBranchAccess(user, payment.branchId);
