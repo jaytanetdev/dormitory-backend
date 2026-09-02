@@ -68,6 +68,12 @@ enum NotificationStatus {
   FAILED
 }
 
+enum RoleScope {
+  PLATFORM
+  STORE
+  BRANCH
+}
+
 model Store {
   id         String          @id @default(cuid())
   name       String
@@ -169,6 +175,7 @@ model Role {
   name        String
   description String?
   isSystem    Boolean          @default(false)
+  scopeLevel  RoleScope        @default(BRANCH)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   deletedAt   DateTime?

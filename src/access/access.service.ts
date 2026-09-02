@@ -105,6 +105,8 @@ export class AccessService {
       this.prisma.branch.count({ where: { id: { in: dto.branchIds }, storeId: user.storeId, deletedAt: null } })
     ]);
     if (!role) throw new BadRequestException('Role does not belong to store');
+    if (role.isSystem && !user.isPlatformAdmin) throw new BadRequestException('System roles can only be assigned by a platform administrator');
+    if (role.scopeLevel === 'PLATFORM' && !user.isPlatformAdmin) throw new BadRequestException('Platform roles can only be assigned by a platform administrator');
     const rolePermissionKeys = await this.prisma.rolePermission.findMany({ where: { roleId: role.id }, select: { permission: { select: { key: true } } } });
     this.assertPermissionSubset(user, rolePermissionKeys.map((item) => item.permission.key));
     if (dto.allBranches && !user.allBranches) throw new BadRequestException('Cannot grant all-branch access');
