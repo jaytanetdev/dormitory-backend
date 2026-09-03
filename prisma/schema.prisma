@@ -125,45 +125,45 @@ model Branch {
 }
 
 model LineIntegration {
-  id                            String   @id @default(cuid())
-  branchId                      String   @unique
-  displayName                   String
-  channelAccessTokenEncrypted   String
-  miniAppChannelSecretEncrypted String
-  miniAppChannelId              String
+  id                              String         @id @default(cuid())
+  branchId                        String         @unique
+  displayName                     String
+  channelAccessTokenEncrypted     String
+  miniAppChannelSecretEncrypted   String
+  miniAppChannelId                String
   messagingChannelSecretEncrypted String
-  messagingChannelId            String
-  liffId                        String
-  isActive                      Boolean  @default(true)
-  credentialVersion             Int      @default(1)
-  createdAt                     DateTime @default(now())
-  updatedAt                     DateTime @updatedAt
-  branch                        Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  identities                    LineIdentity[]
+  messagingChannelId              String
+  liffId                          String
+  isActive                        Boolean        @default(true)
+  credentialVersion               Int            @default(1)
+  createdAt                       DateTime       @default(now())
+  updatedAt                       DateTime       @updatedAt
+  branch                          Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  identities                      LineIdentity[]
 
   @@index([isActive])
 }
 
 model User {
-  id           String           @id @default(cuid())
-  storeId      String
-  roleId       String
-  email        String
-  passwordHash String
-  displayName  String
-  status       UserStatus       @default(ACTIVE)
-  allBranches  Boolean          @default(false)
-  tokenVersion    Int           @default(0)
-  isPlatformAdmin Boolean       @default(false)
-  lastLoginAt  DateTime?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  deletedAt    DateTime?
-  store        Store            @relation(fields: [storeId], references: [id])
-  role         Role             @relation(fields: [roleId], references: [id])
-  branches     UserBranch[]
-  sessions     RefreshSession[]
-  auditLogs    AuditLog[]
+  id              String           @id @default(cuid())
+  storeId         String
+  roleId          String
+  email           String
+  passwordHash    String
+  displayName     String
+  status          UserStatus       @default(ACTIVE)
+  allBranches     Boolean          @default(false)
+  tokenVersion    Int              @default(0)
+  isPlatformAdmin Boolean          @default(false)
+  lastLoginAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  store           Store            @relation(fields: [storeId], references: [id])
+  role            Role             @relation(fields: [roleId], references: [id])
+  branches        UserBranch[]
+  sessions        RefreshSession[]
+  auditLogs       AuditLog[]
 
   @@unique([storeId, email])
   @@index([storeId, roleId])
@@ -473,6 +473,7 @@ model Receipt {
   branch      Branch   @relation(fields: [branchId], references: [id])
   invoice     Invoice  @relation(fields: [invoiceId], references: [id])
   payment     Payment  @relation(fields: [paymentId], references: [id])
+
   @@unique([branchId, number])
   @@index([storeId, branchId, issuedAt])
 }
@@ -480,7 +481,7 @@ model Receipt {
 model PaymentSlip {
   id        String   @id @default(cuid())
   paymentId String   @unique
-  fileUrl   String   
+  fileUrl   String
   fileName  String?
   mimeType  String?
   size      Int?
@@ -501,16 +502,17 @@ model PromptPaySetting {
 }
 
 model LineIdentity {
-  id            String            @id @default(cuid())
-  residentId    String            @unique
-  lineUserId    String            @unique
-  displayName   String?
-  pictureUrl    String?
+  id                String            @id @default(cuid())
+  residentId        String            @unique
+  lineUserId        String            @unique
+  displayName       String?
+  pictureUrl        String?
   lineIntegrationId String?
-  linkedAt      DateTime          @default(now())
-  resident      Resident          @relation(fields: [residentId], references: [id])
-  lineIntegration LineIntegration? @relation(fields: [lineIntegrationId], references: [id], onDelete: SetNull)
-  notifications NotificationLog[]
+  linkedAt          DateTime          @default(now())
+  resident          Resident          @relation(fields: [residentId], references: [id])
+  lineIntegration   LineIntegration?  @relation(fields: [lineIntegrationId], references: [id], onDelete: SetNull)
+  notifications     NotificationLog[]
+  chatMessages      ChatMessage[]
 
   @@index([lineIntegrationId])
 }
@@ -525,6 +527,18 @@ model NotificationLog {
   errorCode      String?
   createdAt      DateTime           @default(now())
   lineIdentity   LineIdentity       @relation(fields: [lineIdentityId], references: [id])
+
+  @@index([lineIdentityId, createdAt])
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  lineIdentityId String
+  direction      String
+  text           String
+  lineMessageId  String?
+  createdAt      DateTime     @default(now())
+  lineIdentity   LineIdentity @relation(fields: [lineIdentityId], references: [id])
 
   @@index([lineIdentityId, createdAt])
 }
