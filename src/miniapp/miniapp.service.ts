@@ -107,7 +107,7 @@ export class MiniappService {
     const invoice = invoices[0] ? await this.invoice(user, invoices[0].id) : null;
     return { profile, invoices, invoice };
   }
-  invoices(user: ResidentUser) { return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId: user.branchId, status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID] }, contract: { residentId: user.residentId } }, select: { id: true, number: true, status: true, total: true, dueDate: true, issuedAt: true, paidAt: true, room: { select: { number: true } }, period: { select: { year: true, month: true } }, payments: { where: { status: 'APPROVED' }, select: { amount: true } } }, orderBy: { dueDate: 'desc' } }); }
+  invoices(user: ResidentUser) { return this.prisma.invoice.findMany({ where: { storeId: user.storeId, branchId: user.branchId, status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID] }, contract: { residentId: user.residentId } }, select: { id: true, number: true, status: true, total: true, dueDate: true, issuedAt: true, paidAt: true, room: { select: { number: true } }, period: { select: { year: true, month: true } }, payments: { select: { id: true, amount: true, paidAt: true, status: true }, orderBy: { createdAt: 'desc' } } }, orderBy: { dueDate: 'desc' } }); }
   invoice(user: ResidentUser, id: string) { return this.prisma.invoice.findFirstOrThrow({ where: { id, storeId: user.storeId, branchId: user.branchId, status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID] }, contract: { residentId: user.residentId } }, include: { items: true, room: { select: { number: true } }, period: true, payments: { include: { slip: true } } } }); }
   async paymentQr(user: ResidentUser, invoiceId: string) {
     const invoice = await this.prisma.invoice.findFirst({

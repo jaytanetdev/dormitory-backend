@@ -49,8 +49,7 @@ export class BillingService {
         if (latest && new Date(reading.readingDate) <= latest.readingDate) throw new ConflictException(`New ${reading.type.toLowerCase()} reading date must be after the latest reading`);
         await tx.meterReading.create({ data: { roomId: contract.roomId, ...reading, readingDate: new Date(reading.readingDate) } });
       }
-      const dueDate = new Date(contract.startDate);
-      dueDate.setDate(dueDate.getDate() + contract.branch.invoiceDueDays);
+      const dueDate = new Date(dto.dueDate ?? period.dueDate);
       const invoice = await tx.invoice.create({ data: { storeId: user.storeId, branchId: dto.branchId, periodId: dto.periodId, contractId: dto.contractId, roomId: contract.roomId, number: dto.number, subtotal, discount: dto.discount, total, dueDate, items: { create: dto.items.map((item, index) => ({ ...item, amount: amounts[index], metadata: item.metadata as Prisma.InputJsonValue | undefined })) } }, include: { items: true } });
       await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'invoice.create', entityType: 'Invoice', entityId: invoice.id, metadata: { number: invoice.number, total: invoice.total.toString(), meterReadings: dto.meterReadings?.length ?? 0 } } });
       return invoice;
