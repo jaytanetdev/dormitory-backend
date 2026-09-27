@@ -89,14 +89,12 @@ describe("staff management", () => {
     const prisma = {
       user: { findFirst: jest.fn().mockResolvedValue(value) },
       role: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: "staff",
-            isSystem: false,
-            scopeLevel: "BRANCH",
-            permissions: [{ permission: { key: "room.view" } }],
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: "staff",
+          isSystem: false,
+          scopeLevel: "BRANCH",
+          permissions: [{ permission: { key: "room.view" } }],
+        }),
       },
       branch: { count: jest.fn().mockResolvedValue(1) },
       $transaction: jest.fn(),
@@ -201,5 +199,31 @@ describe("staff management", () => {
     expect(
       (await service.assignableRoles(actor)).map((role) => role.id),
     ).toEqual(["allowed"]);
+  });
+});
+
+describe("branch registration links", () => {
+  it("targets the branch claim route and passes its LIFF id", async () => {
+    const prisma = {
+      branch: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            {
+              id: "b1",
+              claimCode: "code",
+              lineIntegration: { liffId: "qa-liff" },
+            },
+          ]),
+      },
+    };
+    const service = new AccessService(
+      prisma as never,
+      {} as never,
+      { getOrThrow: () => "https://app.example.invalid" } as never,
+    );
+    expect((await service.listBranches(actor))[0].residentClaimUrl).toBe(
+      "https://miniapp.line.me/qa-liff/claim/branch/code?liffId=qa-liff",
+    );
   });
 });

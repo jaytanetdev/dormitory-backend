@@ -26,10 +26,11 @@ export class AuthService {
     catch { throw new UnauthorizedException('Invalid refresh token'); }
     if (claims.type !== 'refresh') throw new UnauthorizedException('Invalid token type');
     const session = await this.prisma.refreshSession.findUnique({ where: { id: claims.sid }, include: { user: true } });
-    if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.tokenVersion !== claims.ver || !(await compare(raw, session.tokenHash))) {
+    if (!session || session.revokedAt || session.expiresAt <= new Date() || session.userId !== claims.sub || session.user.status !== 'ACTIVE' || session.user.deletedAt || session.user.tokenVersion !== claims.ver || !(await compare(raw, session.tokenHash))) {
       throw new UnauthorizedException('Refresh token expired or reused');
     }
-    await this.prisma.refreshSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+    const claimed = await this.prisma.refreshSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date() } });
+    if (claimed.count !== 1) throw new UnauthorizedException('Refresh token expired or reused');
     return this.issuePair(session.userId, session.user.tokenVersion);
   }
 

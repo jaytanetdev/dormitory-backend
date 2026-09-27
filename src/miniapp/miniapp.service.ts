@@ -126,8 +126,9 @@ export class MiniappService {
     return { invoiceId: invoice.id, amount, accountName: setting.accountName, promptPayTarget: setting.target, qrDataUrl: await QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 480 }) };
   }
   async payment(user: ResidentUser, dto: MiniPaymentDto) {
-    const invoice = await this.prisma.invoice.findFirst({ where: { id: dto.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { payments: { where: { status: PaymentStatus.APPROVED } } } }); if (!invoice) throw new NotFoundException('Payable invoice not found');
-    const approved = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0); const outstanding = Math.max(0, Number(invoice.total) - approved); if (dto.amount > outstanding) throw new ConflictException('Payment exceeds outstanding balance');
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: dto.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { payments: true } }); if (!invoice) throw new NotFoundException('Payable invoice not found');
+    if (invoice.payments.some(payment => payment.status === PaymentStatus.PENDING)) throw new ConflictException('Payment is already pending review');
+    const approved = invoice.payments.filter(payment => payment.status === PaymentStatus.APPROVED).reduce((sum, payment) => sum + Number(payment.amount), 0); const outstanding = Math.max(0, Number(invoice.total) - approved); if (dto.amount > outstanding) throw new ConflictException('Payment exceeds outstanding balance');
     return this.prisma.payment.create({ data: { storeId: user.storeId, branchId: user.branchId, invoiceId: invoice.id, amount: dto.amount, paidAt: new Date(dto.paidAt), slip: { create: { fileUrl: dto.fileUrl, fileName: dto.fileName, mimeType: dto.mimeType, size: dto.size } } }, include: { slip: true } });
   }
   async uploadSlip(user: ResidentUser, file: UploadedSlip | undefined, body: { invoiceId: string; amount: string; paidAt: string }) {
@@ -135,9 +136,10 @@ export class MiniappService {
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) throw new BadRequestException('Slip must be a JPG, PNG, or WebP image');
     if (!Number.isFinite(Number(body.amount)) || Number(body.amount) <= 0) throw new BadRequestException('Payment amount is invalid');
     if (Number.isNaN(new Date(body.paidAt).getTime())) throw new BadRequestException('Payment date is invalid');
-    const invoice = await this.prisma.invoice.findFirst({ where: { id: body.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { branch: true, room: true, payments: { where: { status: PaymentStatus.APPROVED }, select: { amount: true } } } });
+    const invoice = await this.prisma.invoice.findFirst({ where: { id: body.invoiceId, storeId: user.storeId, branchId: user.branchId, contract: { residentId: user.residentId }, status: { in: [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE] } }, include: { branch: true, room: true, payments: { select: { amount: true, status: true } } } });
     if (!invoice) throw new NotFoundException('Payable invoice not found');
-    const outstanding = Math.max(0, Number(invoice.total) - invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0));
+    if (invoice.payments.some(payment => payment.status === PaymentStatus.PENDING)) throw new ConflictException('Payment is already pending review');
+    const outstanding = Math.max(0, Number(invoice.total) - invoice.payments.filter(payment => payment.status === PaymentStatus.APPROVED).reduce((sum, payment) => sum + Number(payment.amount), 0));
     if (Number(body.amount) > outstanding) throw new ConflictException('Payment exceeds outstanding balance');
     const fileUrl = await this.uploadToCloudinary(file, invoice.branch.code, invoice.room.number);
     return this.payment(user, { invoiceId: body.invoiceId, amount: Number(body.amount), paidAt: body.paidAt, fileUrl, fileName: file.originalname, mimeType: file.mimetype, size: file.size });

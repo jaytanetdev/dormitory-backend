@@ -38,7 +38,9 @@ export class LineService {
     if (!integration || !signature) return false;
     const secret = this.credentials.decrypt(integration.messagingChannelSecretEncrypted);
     const expected = createHmac('sha256', secret).update(body).digest('base64');
-    return expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    const expectedBytes = Buffer.from(expected);
+    const signatureBytes = Buffer.from(signature);
+    return expectedBytes.length === signatureBytes.length && timingSafeEqual(expectedBytes, signatureBytes);
   }
   async verifyIdToken(integrationId: string, idToken: string): Promise<{ sub: string; name?: string; picture?: string }> {
     if (this.config.get('NODE_ENV') !== 'production' && idToken.startsWith('mock-line:')) return { sub: idToken.slice(10), name: 'Mock LINE User' };
@@ -68,7 +70,8 @@ export class LineService {
   }
   private withLiffId(url: string, liffId: string | undefined): string {
     if (!liffId) return url;
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}liffId=${encodeURIComponent(liffId)}`;
+    const link = new URL(url);
+    link.searchParams.set('liffId', liffId);
+    return link.toString();
   }
 }
