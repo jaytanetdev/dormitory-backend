@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestUser } from '../common/request-user';
 import { CreateStoreDto } from './platform.dto';
+import { DEFAULT_STAFF_ROLES } from '../access/default-roles';
 @Injectable()
 export class PlatformService {
   constructor(private readonly prisma: PrismaService) {}
@@ -12,7 +13,8 @@ export class PlatformService {
     try { return await this.prisma.$transaction(async (tx) => {
       const permissions = await tx.permission.findMany(); const store = await tx.store.create({ data: { name: dto.name, slug: dto.slug } });
       const branch = await tx.branch.create({ data: { storeId: store.id, name: dto.branchName, code: dto.branchCode.toUpperCase() } });
-      const role = await tx.role.create({ data: { storeId: store.id, name: 'Owner', description: 'System owner role', isSystem: true, permissions: { create: permissions.map((permission) => ({ permissionId: permission.id })) } } });
+      const role = await tx.role.create({ data: { storeId: store.id, name: 'Owner', description: 'System owner role', isSystem: true, scopeLevel: 'STORE', permissions: { create: permissions.map((permission) => ({ permissionId: permission.id })) } } });
+      for (const preset of DEFAULT_STAFF_ROLES) await tx.role.create({ data: { storeId: store.id, name: preset.name, description: preset.description, scopeLevel: 'BRANCH', permissions: { create: permissions.filter(permission => (preset.keys as readonly string[]).includes(permission.key)).map(permission => ({ permissionId: permission.id })) } } });
       const owner = await tx.user.create({ data: { storeId: store.id, roleId: role.id, email: dto.ownerEmail.toLowerCase(), displayName: dto.ownerName, passwordHash: await hash(dto.ownerPassword, 12), allBranches: true } });
       await tx.auditLog.create({ data: { storeId: store.id, actorUserId: actor.id, action: 'platform.store.create', entityType: 'Store', entityId: store.id, metadata: { ownerId: owner.id, branchId: branch.id } } });
       return { store, branch, owner: { id: owner.id, email: owner.email, displayName: owner.displayName } };

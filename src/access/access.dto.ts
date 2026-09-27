@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { ArrayUnique, IsArray, IsBoolean, IsEmail, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
+import { UserStatus } from '@prisma/client';
+import { ArrayUnique, IsArray, IsEnum, IsBoolean, IsEmail, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 
 export class CreateBranchDto {
   @IsString() name!: string; @IsString() code!: string; @IsOptional() @IsString() address?: string; @IsOptional() @IsString() phone?: string;
@@ -25,3 +26,11 @@ export class CreateUserDto {
 }
 export class PermissionMatrixItemDto { @IsString() module!: string; @IsArray() @ValidateNested({ each: true }) @Type(() => PermissionActionDto) actions!: PermissionActionDto[]; }
 export class PermissionActionDto { @IsString() key!: string; @IsString() action!: string; }
+
+export class UpdateUserDto {
+  @IsString() @MinLength(1) displayName!: string;
+  @IsString() roleId!: string;
+  @IsBoolean() allBranches!: boolean;
+  @IsArray() @ArrayUnique() @IsString({ each: true }) branchIds!: string[];
+  @IsEnum(UserStatus) status!: UserStatus;
+}

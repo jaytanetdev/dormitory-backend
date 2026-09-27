@@ -8,6 +8,8 @@ export interface RequestUser {
   allBranches: boolean;
   branchIds: string[];
   isPlatformAdmin: boolean;
+  displayName?: string;
+  roleName?: string;
 }
 export interface ResidentUser { residentId: string; storeId: string; branchId: string; lineUserId: string; }
 export type AuthenticatedRequest = Request & { user: RequestUser };

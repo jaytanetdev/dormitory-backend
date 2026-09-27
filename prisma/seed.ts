@@ -1,5 +1,6 @@
 import { PrismaClient, PromptPayType } from '@prisma/client';
 import { hash } from 'bcrypt';
+import { DEFAULT_STAFF_ROLES } from '../src/access/default-roles';
 import { createCipheriv, randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
@@ -31,6 +32,11 @@ async function main(): Promise<void> {
   const role = await prisma.role.upsert({ where: { storeId_name: { storeId: store.id, name: 'Owner' } }, create: { storeId: store.id, name: 'Owner', isSystem: true, scopeLevel: 'STORE' }, update: { scopeLevel: 'STORE', isSystem: true } });
   const permissions = await prisma.permission.findMany();
   await prisma.rolePermission.createMany({ data: permissions.map((permission) => ({ roleId: role.id, permissionId: permission.id })), skipDuplicates: true });
+  for (const preset of DEFAULT_STAFF_ROLES) {
+    if (await prisma.role.findUnique({ where: { storeId_name: { storeId: store.id, name: preset.name } } })) continue;
+    const staffRole = await prisma.role.create({ data: { storeId: store.id, name: preset.name, description: preset.description, scopeLevel: 'BRANCH' } });
+    await prisma.rolePermission.createMany({ data: permissions.filter(permission => (preset.keys as readonly string[]).includes(permission.key)).map(permission => ({ roleId: staffRole.id, permissionId: permission.id })), skipDuplicates: true });
+  }
   const owner = await prisma.user.upsert({ where: { storeId_email: { storeId: store.id, email: 'owner@demo.local' } }, create: { storeId: store.id, roleId: role.id, email: 'owner@demo.local', passwordHash: await hash('Dormitory123!', 12), displayName: 'เจ้าของหอพักเดโม', allBranches: true }, update: { roleId: role.id, allBranches: true } });
   const platformRole = await prisma.role.upsert({ where: { storeId_name: { storeId: store.id, name: 'SUPER_ADMIN' } }, create: { storeId: store.id, name: 'SUPER_ADMIN', description: 'Platform-wide administrator; cannot be edited from Backoffice', isSystem: true, scopeLevel: 'PLATFORM' }, update: { isSystem: true, scopeLevel: 'PLATFORM' } });
   await prisma.rolePermission.createMany({ data: permissions.map((permission) => ({ roleId: platformRole.id, permissionId: permission.id })), skipDuplicates: true });

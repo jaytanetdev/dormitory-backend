@@ -14,6 +14,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (payload.type !== 'access') throw new UnauthorizedException();
     const user = await this.prisma.user.findFirst({ where: { id: payload.sub, deletedAt: null, status: 'ACTIVE' }, include: { role: { include: { permissions: { include: { permission: true } } } }, branches: true } });
     if (!user || user.role.deletedAt) throw new UnauthorizedException();
-    return { id: user.id, storeId: user.storeId, roleId: user.roleId, permissions: user.role.permissions.map((item) => item.permission.key), allBranches: user.allBranches, branchIds: user.branches.map((item) => item.branchId), isPlatformAdmin: user.isPlatformAdmin };
+    return { displayName: user.displayName, roleName: user.role.name, id: user.id, storeId: user.storeId, roleId: user.roleId, permissions: user.role.permissions.map((item) => item.permission.key), allBranches: user.allBranches, branchIds: user.branches.map((item) => item.branchId), isPlatformAdmin: user.isPlatformAdmin };
   }
 }

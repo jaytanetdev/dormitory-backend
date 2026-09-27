@@ -4,7 +4,7 @@ import { Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestUser } from '../common/request-user';
 import { assertBranchAccess } from '../common/branch-access';
-import { CreateBranchDto, CreateRoleDto, CreateUserDto, UpdateBranchDto, UpdateRolePermissionsDto } from './access.dto';
+import { CreateBranchDto, CreateRoleDto, CreateUserDto, UpdateBranchDto, UpdateRolePermissionsDto, UpdateUserDto } from './access.dto';
 import { LineCredentialsService } from '../line/line-credentials';
 import { ConfigService } from '@nestjs/config';
 
@@ -98,7 +98,42 @@ export class AccessService {
       return tx.role.findUniqueOrThrow({ where: { id: roleId }, include: { permissions: { include: { permission: true } } } });
     });
   }
-  listUsers(user: RequestUser) { return this.prisma.user.findMany({ where: { storeId: user.storeId, deletedAt: null }, select: { id: true, email: true, displayName: true, status: true, allBranches: true, role: { select: { id: true, name: true } }, branches: { select: { branch: { select: { id: true, name: true } } } } } }); }
+  async listUsers(user: RequestUser) {
+    const items = await this.prisma.user.findMany({ where: { storeId: user.storeId, deletedAt: null, ...(user.allBranches ? {} : { allBranches: false, branches: { some: { branchId: { in: user.branchIds } }, every: { branchId: { in: user.branchIds } } } }) }, select: { id: true, email: true, displayName: true, status: true, allBranches: true, isPlatformAdmin: true, role: { select: { id: true, name: true, isSystem: true, scopeLevel: true, permissions: { select: { permission: { select: { key: true } } } } } }, branches: { select: { branch: { select: { id: true, name: true } } } } } });
+    return items.map(item => {
+      const { permissions, ...role } = item.role;
+      const canManage = user.permissions.includes('user.update') && item.id !== user.id && !item.isPlatformAdmin && !role.isSystem && (user.isPlatformAdmin || permissions.every(entry => user.permissions.includes(entry.permission.key)));
+      const { isPlatformAdmin: _platform, ...safe } = item;
+      return { ...safe, role, canManage };
+    });
+  }
+  async assignableRoles(user: RequestUser) {
+    const roles = await this.prisma.role.findMany({ where: { storeId: user.storeId, deletedAt: null, isSystem: false, scopeLevel: { not: 'PLATFORM' } }, include: { permissions: { include: { permission: true } } }, orderBy: { name: 'asc' } });
+    return roles.filter(role => user.isPlatformAdmin || role.permissions.every(item => user.permissions.includes(item.permission.key)));
+  }
+  async updateUser(user: RequestUser, id: string, dto: UpdateUserDto) {
+    if (!dto.displayName.trim()) throw new BadRequestException('Display name is required');
+    const target = await this.prisma.user.findFirst({ where: { id, storeId: user.storeId, deletedAt: null }, include: { role: { include: { permissions: { include: { permission: true } } } }, branches: true } });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.id === user.id) throw new ConflictException('ไม่สามารถแก้ไขสิทธิ์หรือสถานะบัญชีของตัวเอง');
+    if (target.isPlatformAdmin || target.role.isSystem) throw new ConflictException('บัญชีระบบไม่อนุญาตให้แก้ไขจากหน้านี้');
+    if (!user.allBranches && (target.allBranches || target.branches.some(branch => !user.branchIds.includes(branch.branchId)))) throw new BadRequestException('Cannot manage a user outside actor scope');
+    this.assertPermissionSubset(user, target.role.permissions.map(item => item.permission.key));
+    const role = await this.prisma.role.findFirst({ where: { id: dto.roleId, storeId: user.storeId, deletedAt: null }, include: { permissions: { include: { permission: true } } } });
+    if (!role || role.isSystem || role.scopeLevel === 'PLATFORM') throw new BadRequestException('Choose an assignable staff role');
+    this.assertPermissionSubset(user, role.permissions.map(item => item.permission.key));
+    if (dto.allBranches && !user.allBranches) throw new BadRequestException('Cannot grant all-branch access');
+    if (!user.allBranches && dto.branchIds.some(branchId => !user.branchIds.includes(branchId))) throw new BadRequestException('Cannot grant a branch outside actor scope');
+    const branchCount = await this.prisma.branch.count({ where: { id: { in: dto.branchIds }, storeId: user.storeId, deletedAt: null } });
+    if (!dto.allBranches && (!dto.branchIds.length || branchCount !== dto.branchIds.length)) throw new BadRequestException('Invalid branch scope');
+    return this.prisma.$transaction(async tx => {
+      await tx.userBranch.deleteMany({ where: { userId: id } });
+      const updated = await tx.user.update({ where: { id }, data: { displayName: dto.displayName.trim(), roleId: dto.roleId, status: dto.status, allBranches: dto.allBranches, branches: { create: dto.allBranches ? [] : dto.branchIds.map(branchId => ({ branchId })) } }, select: { id: true, email: true, displayName: true, status: true, allBranches: true, role: { select: { id: true, name: true, isSystem: true, scopeLevel: true } }, branches: { select: { branch: { select: { id: true, name: true } } } } } });
+      if (dto.status !== 'ACTIVE') await tx.refreshSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      await tx.auditLog.create({ data: { storeId: user.storeId, actorUserId: user.id, action: 'user.update', entityType: 'User', entityId: id, metadata: { roleId: dto.roleId, status: dto.status, allBranches: dto.allBranches, branchIds: dto.branchIds } } });
+      return updated;
+    });
+  }
   async createUser(user: RequestUser, dto: CreateUserDto) {
     const [role, branchCount] = await Promise.all([
       this.prisma.role.findFirst({ where: { id: dto.roleId, storeId: user.storeId, deletedAt: null } }),

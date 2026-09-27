@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, PlatformOnly, RequirePermissions } from '../common/decorators';
 import type { RequestUser } from '../common/request-user';
 import { AccessService } from './access.service';
-import { CreateBranchDto, CreateRoleDto, CreateUserDto, UpdateBranchDto, UpdateRolePermissionsDto } from './access.dto';
+import { CreateBranchDto, CreateRoleDto, CreateUserDto, UpdateBranchDto, UpdateRolePermissionsDto, UpdateUserDto } from './access.dto';
 
 @ApiBearerAuth() @ApiTags('Access control') @Controller()
 export class AccessController {
@@ -17,5 +17,7 @@ export class AccessController {
   @Post('roles') @PlatformOnly() @RequirePermissions('role.create') createRole(@CurrentUser() user: RequestUser, @Body() dto: CreateRoleDto) { return this.service.createRole(user, dto); }
   @Patch('roles/:roleId/permissions') @PlatformOnly() @RequirePermissions('role.update') updateRole(@CurrentUser() user: RequestUser, @Param('roleId') id: string, @Body() dto: UpdateRolePermissionsDto) { return this.service.updateRolePermissions(user, id, dto); }
   @Get('users') @RequirePermissions('user.view') users(@CurrentUser() user: RequestUser) { return this.service.listUsers(user); }
+  @Get('users/assignable-roles') @RequirePermissions('user.view') assignableRoles(@CurrentUser() user: RequestUser) { return this.service.assignableRoles(user); }
+  @Patch('users/:userId') @RequirePermissions('user.update') updateUser(@CurrentUser() user: RequestUser, @Param('userId') id: string, @Body() dto: UpdateUserDto) { return this.service.updateUser(user, id, dto); }
   @Post('users') @RequirePermissions('user.create') createUser(@CurrentUser() user: RequestUser, @Body() dto: CreateUserDto) { return this.service.createUser(user, dto); }
 }
